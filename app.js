@@ -156,7 +156,7 @@ async function getPRSlackThread(prNumber) {
 
     // Look for our bot comment with Slack metadata
     for (const comment of comments) {
-      const channelMatch = comment.body.match(/<!-- slack_pr_channel:(\w+) -->/);
+      const channelMatch = comment.body.match(/<!-- slack_pr_channel:([\w-]+) -->/);
       const tsMatch = comment.body.match(/<!-- slack_pr_thread_ts:([\d.]+) -->/);
       if (channelMatch && tsMatch) {
         return { channelId: channelMatch[1], threadTs: tsMatch[1] };
