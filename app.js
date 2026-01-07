@@ -213,9 +213,13 @@ app.command('/billingapp-request', async ({ ack, body, client, logger }) => {
   await ack();
 
   try {
+    const view = buildModalView(false);
+    // Store channel ID in private_metadata to post confirmation there
+    view.private_metadata = JSON.stringify({ channel_id: body.channel_id });
+
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: buildModalView(false),
+      view,
     });
   } catch (error) {
     logger.error('Error opening modal:', error);
@@ -236,6 +240,8 @@ app.action('type_select', async ({ ack, body, client, logger }) => {
 
     // Build updated view
     const updatedView = buildModalView(showSteps);
+    // Preserve private_metadata (channel ID)
+    updatedView.private_metadata = currentView.private_metadata;
 
     // Preserve existing input values
     if (currentValues.title_block?.title_input?.value) {
@@ -297,8 +303,10 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
   const acceptanceCriteria = values.acceptance_block.acceptance_input.value;
   const attachmentsInfo = values.attachments_block?.attachments_input?.value || null;
 
-  // Get user info
+  // Get user info and channel
   const userId = body.user.id;
+  const metadata = JSON.parse(view.private_metadata || '{}');
+  const channelId = metadata.channel_id;
 
   try {
     // Build GitHub issue body
@@ -334,16 +342,16 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
     // Acknowledge the submission
     await ack();
 
-    // Send confirmation message to user
+    // Send confirmation message to channel
     await client.chat.postMessage({
-      channel: userId,
-      text: `Your billing request has been submitted successfully!`,
+      channel: channelId,
+      text: `Billing request submitted by <@${userId}>`,
       blocks: [
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Your billing request has been submitted!*`,
+            text: `*Billing request submitted by <@${userId}>*`,
           },
         },
         {
