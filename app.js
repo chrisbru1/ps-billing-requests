@@ -51,6 +51,100 @@ function extractLinkedIssues(prBody) {
   return Array.from(issues);
 }
 
+// Build PR notification blocks
+function buildPRNotificationBlocks(pr, action, issueInfo = null) {
+  let message, emoji;
+  if (action === 'opened') {
+    emoji = ':rocket:';
+    message = issueInfo
+      ? `*Pull request opened for issue #${issueInfo.number}*`
+      : `*Pull request opened*`;
+  } else {
+    emoji = ':white_check_mark:';
+    message = issueInfo
+      ? `*Pull request merged for issue #${issueInfo.number}*`
+      : `*Pull request merged*`;
+  }
+
+  // Truncate PR body if too long (Slack has limits)
+  let prBody = pr.body || '_No description provided_';
+  // Remove the issue reference patterns from the body for cleaner display
+  prBody = prBody.replace(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*#\d+/gi, '').trim();
+  if (prBody.length > 1500) {
+    prBody = prBody.substring(0, 1500) + '...';
+  }
+  if (!prBody) prBody = '_No additional description_';
+
+  const blocks = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `${emoji} ${message}`,
+      },
+    },
+  ];
+
+  // Add issue link if this is linked to a Slack-created issue
+  if (issueInfo) {
+    blocks.push({
+      type: 'section',
+      fields: [
+        {
+          type: 'mrkdwn',
+          text: `*Issue:*\n<${issueInfo.html_url}|#${issueInfo.number}: ${issueInfo.title}>`,
+        },
+        {
+          type: 'mrkdwn',
+          text: `*PR:*\n<${pr.html_url}|#${pr.number}: ${pr.title}>`,
+        },
+      ],
+    });
+  } else {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*<${pr.html_url}|#${pr.number}: ${pr.title}>*`,
+      },
+    });
+  }
+
+  blocks.push(
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: prBody,
+      },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `${action === 'opened' ? 'Opened' : 'Merged'} by *${pr.user.login}*`,
+        },
+      ],
+    }
+  );
+
+  // Add merge commit info if merged
+  if (action === 'closed' && pr.merged) {
+    blocks.push({
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `Merged into \`${pr.base.ref}\` from \`${pr.head.ref}\``,
+        },
+      ],
+    });
+  }
+
+  return { blocks, message };
+}
+
 // Handle GitHub webhook events
 async function handleGitHubWebhook(event, payload) {
   if (event !== 'pull_request') return;
@@ -63,7 +157,9 @@ async function handleGitHubWebhook(event, payload) {
 
   // Extract linked issue numbers from PR body
   const linkedIssues = extractLinkedIssues(pr.body);
-  if (linkedIssues.length === 0) return;
+
+  // Track if we found any Slack-created issues
+  let notifiedSlackThread = false;
 
   // For each linked issue, try to notify the Slack channel
   for (const issueNumber of linkedIssues) {
@@ -78,71 +174,14 @@ async function handleGitHubWebhook(event, payload) {
       const { channelId, threadTs } = extractSlackMetadata(issue.body);
       if (!channelId) continue;
 
-      // Build notification message
-      let message, emoji;
-      if (action === 'opened') {
-        emoji = ':rocket:';
-        message = `*Pull request opened for issue #${issueNumber}*`;
-      } else {
-        emoji = ':white_check_mark:';
-        message = `*Pull request merged for issue #${issueNumber}*`;
-      }
+      // This is a Slack-created issue - notify in thread
+      notifiedSlackThread = true;
 
-      // Truncate PR body if too long (Slack has limits)
-      let prBody = pr.body || '_No description provided_';
-      // Remove the issue reference patterns from the body for cleaner display
-      prBody = prBody.replace(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*#\d+/gi, '').trim();
-      if (prBody.length > 1500) {
-        prBody = prBody.substring(0, 1500) + '...';
-      }
-      if (!prBody) prBody = '_No additional description_';
-
-      // Build blocks for the message
-      const blocks = [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `${emoji} ${message}`,
-          },
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*<${pr.html_url}|#${pr.number}: ${pr.title}>*`,
-          },
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: prBody,
-          },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `${action === 'opened' ? 'Opened' : 'Merged'} by *${pr.user.login}*`,
-            },
-          ],
-        },
-      ];
-
-      // Add merge commit info if merged
-      if (action === 'closed' && pr.merged) {
-        blocks.push({
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `Merged into \`${pr.base.ref}\` from \`${pr.head.ref}\``,
-            },
-          ],
-        });
-      }
+      const { blocks, message } = buildPRNotificationBlocks(pr, action, {
+        number: issueNumber,
+        title: issue.title,
+        html_url: issue.html_url,
+      });
 
       // Send notification to Slack (threaded if we have the original message ts)
       const messageOptions = {
@@ -161,6 +200,23 @@ async function handleGitHubWebhook(event, payload) {
       console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}${threadTs ? ' (threaded)' : ''}`);
     } catch (error) {
       console.error(`Failed to notify for issue #${issueNumber}:`, error.message);
+    }
+  }
+
+  // If no Slack-created issues were found, post to the general PR channel
+  if (!notifiedSlackThread) {
+    try {
+      const { blocks, message } = buildPRNotificationBlocks(pr, action);
+
+      await app.client.chat.postMessage({
+        channel: PR_NOTIFICATION_CHANNEL,
+        text: `${message}: ${pr.title}`,
+        blocks,
+      });
+
+      console.log(`Notified ${PR_NOTIFICATION_CHANNEL} about PR #${pr.number} (no Slack-created issue linked)`);
+    } catch (error) {
+      console.error(`Failed to notify ${PR_NOTIFICATION_CHANNEL}:`, error.message);
     }
   }
 }
@@ -217,6 +273,9 @@ const octokit = new Octokit({
 // GitHub repo configuration
 const GITHUB_OWNER = 'chrisbru1';
 const GITHUB_REPO = 'psbillingapp';
+
+// Slack channel for non-Slack-created PR notifications
+const PR_NOTIFICATION_CHANNEL = process.env.PR_NOTIFICATION_CHANNEL || 'ps-billing-app-testing';
 
 // Build the modal view
 function buildModalView(showStepsToReproduce = false) {
