@@ -2,13 +2,20 @@ require('dotenv').config();
 
 const { App } = require('@slack/bolt');
 const { Octokit } = require('@octokit/rest');
+const http = require('http');
 
-// Initialize Slack Bolt app
+// Initialize Slack Bolt app with Socket Mode
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   socketMode: true,
   appToken: process.env.SLACK_APP_TOKEN,
+});
+
+// Simple HTTP server for Heroku health checks
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Billing Requests app is running');
 });
 
 // Initialize GitHub client
@@ -387,6 +394,13 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
 // Start the app
 (async () => {
   const port = process.env.PORT || 3000;
-  await app.start(port);
-  console.log(`Billing Requests app is running on port ${port}`);
+
+  // Start HTTP server for Heroku health checks
+  server.listen(port, () => {
+    console.log(`HTTP health check server listening on port ${port}`);
+  });
+
+  // Start Slack app (Socket Mode connects via WebSocket)
+  await app.start();
+  console.log('Slack app connected via Socket Mode');
 })();
