@@ -23,10 +23,14 @@ function verifyGitHubSignature(payload, signature) {
   return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
 }
 
-// Extract Slack channel ID from issue body
-function extractSlackChannel(issueBody) {
-  const match = issueBody?.match(/<!-- slack_channel:(\w+) -->/);
-  return match ? match[1] : null;
+// Extract Slack metadata from issue body (channel ID and message timestamp for threading)
+function extractSlackMetadata(issueBody) {
+  const channelMatch = issueBody?.match(/<!-- slack_channel:(\w+) -->/);
+  const tsMatch = issueBody?.match(/<!-- slack_thread_ts:([\d.]+) -->/);
+  return {
+    channelId: channelMatch ? channelMatch[1] : null,
+    threadTs: tsMatch ? tsMatch[1] : null,
+  };
 }
 
 // Extract issue numbers from PR body (looks for "Fixes #123", "Closes #123", etc.)
@@ -64,64 +68,97 @@ async function handleGitHubWebhook(event, payload) {
   // For each linked issue, try to notify the Slack channel
   for (const issueNumber of linkedIssues) {
     try {
-      // Fetch the issue to get the Slack channel from the body
+      // Fetch the issue to get the Slack metadata from the body
       const { data: issue } = await octokit.issues.get({
         owner: GITHUB_OWNER,
         repo: GITHUB_REPO,
         issue_number: issueNumber,
       });
 
-      const channelId = extractSlackChannel(issue.body);
+      const { channelId, threadTs } = extractSlackMetadata(issue.body);
       if (!channelId) continue;
 
       // Build notification message
       let message, emoji;
       if (action === 'opened') {
-        emoji = ':pr:';
+        emoji = ':rocket:';
         message = `*Pull request opened for issue #${issueNumber}*`;
       } else {
-        emoji = ':merged:';
+        emoji = ':white_check_mark:';
         message = `*Pull request merged for issue #${issueNumber}*`;
       }
 
-      // Send notification to Slack
-      await app.client.chat.postMessage({
+      // Truncate PR body if too long (Slack has limits)
+      let prBody = pr.body || '_No description provided_';
+      // Remove the issue reference patterns from the body for cleaner display
+      prBody = prBody.replace(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*#\d+/gi, '').trim();
+      if (prBody.length > 1500) {
+        prBody = prBody.substring(0, 1500) + '...';
+      }
+      if (!prBody) prBody = '_No additional description_';
+
+      // Build blocks for the message
+      const blocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `${emoji} ${message}`,
+          },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*<${pr.html_url}|#${pr.number}: ${pr.title}>*`,
+          },
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: prBody,
+          },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `${action === 'opened' ? 'Opened' : 'Merged'} by *${pr.user.login}*`,
+            },
+          ],
+        },
+      ];
+
+      // Add merge commit info if merged
+      if (action === 'closed' && pr.merged) {
+        blocks.push({
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `Merged into \`${pr.base.ref}\` from \`${pr.head.ref}\``,
+            },
+          ],
+        });
+      }
+
+      // Send notification to Slack (threaded if we have the original message ts)
+      const messageOptions = {
         channel: channelId,
         text: `${message}: ${pr.title}`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `${emoji || ':github:'} ${message}`,
-            },
-          },
-          {
-            type: 'section',
-            fields: [
-              {
-                type: 'mrkdwn',
-                text: `*Issue:*\n<${issue.html_url}|#${issueNumber}: ${issue.title}>`,
-              },
-              {
-                type: 'mrkdwn',
-                text: `*PR:*\n<${pr.html_url}|#${pr.number}: ${pr.title}>`,
-              },
-            ],
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: `${action === 'opened' ? 'Opened' : 'Merged'} by ${pr.user.login}`,
-              },
-            ],
-          },
-        ],
-      });
+        blocks,
+      };
 
-      console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}`);
+      // Thread under the original request if we have the timestamp
+      if (threadTs) {
+        messageOptions.thread_ts = threadTs;
+      }
+
+      await app.client.chat.postMessage(messageOptions);
+
+      console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}${threadTs ? ' (threaded)' : ''}`);
     } catch (error) {
       console.error(`Failed to notify for issue #${issueNumber}:`, error.message);
     }
@@ -486,7 +523,7 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
     // Create labels array
     const labels = [type, priority];
 
-    // Create GitHub issue
+    // Create GitHub issue (without thread_ts initially)
     const { data: issue } = await octokit.issues.create({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
@@ -499,7 +536,7 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
     await ack();
 
     // Send confirmation message to channel
-    await client.chat.postMessage({
+    const messageResult = await client.chat.postMessage({
       channel: channelId,
       text: `Billing request submitted by <@${userId}>`,
       blocks: [
@@ -540,6 +577,17 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
         },
       ],
     });
+
+    // Update the GitHub issue with the Slack message timestamp for threading
+    if (messageResult.ts) {
+      const updatedBody = issueBody + `\n<!-- slack_thread_ts:${messageResult.ts} -->`;
+      await octokit.issues.update({
+        owner: GITHUB_OWNER,
+        repo: GITHUB_REPO,
+        issue_number: issue.number,
+        body: updatedBody,
+      });
+    }
 
     logger.info(`Created GitHub issue #${issue.number}: ${title}`);
   } catch (error) {
