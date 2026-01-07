@@ -145,6 +145,43 @@ function buildPRNotificationBlocks(pr, action, issueInfo = null) {
   return { blocks, message };
 }
 
+// Get Slack thread info from PR comment (for threading merge under open notification)
+async function getPRSlackThread(prNumber) {
+  try {
+    const { data: comments } = await octokit.issues.listComments({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: prNumber,
+    });
+
+    // Look for our bot comment with Slack metadata
+    for (const comment of comments) {
+      const channelMatch = comment.body.match(/<!-- slack_pr_channel:(\w+) -->/);
+      const tsMatch = comment.body.match(/<!-- slack_pr_thread_ts:([\d.]+) -->/);
+      if (channelMatch && tsMatch) {
+        return { channelId: channelMatch[1], threadTs: tsMatch[1] };
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to get PR comments for #${prNumber}:`, error.message);
+  }
+  return null;
+}
+
+// Save Slack thread info to PR comment (for threading merge under open notification)
+async function savePRSlackThread(prNumber, channelId, threadTs) {
+  try {
+    await octokit.issues.createComment({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      issue_number: prNumber,
+      body: `Slack notification sent.\n\n<!-- slack_pr_channel:${channelId} -->\n<!-- slack_pr_thread_ts:${threadTs} -->`,
+    });
+  } catch (error) {
+    console.error(`Failed to save PR Slack thread for #${prNumber}:`, error.message);
+  }
+}
+
 // Handle GitHub webhook events
 async function handleGitHubWebhook(event, payload) {
   if (event !== 'pull_request') return;
@@ -183,21 +220,35 @@ async function handleGitHubWebhook(event, payload) {
         html_url: issue.html_url,
       });
 
-      // Send notification to Slack (threaded if we have the original message ts)
+      // Send notification to Slack
       const messageOptions = {
         channel: channelId,
         text: `${message}: ${pr.title}`,
         blocks,
       };
 
-      // Thread under the original request if we have the timestamp
-      if (threadTs) {
+      // For merged PRs, try to thread under the "opened" notification first
+      if (action === 'closed' && pr.merged) {
+        const prThread = await getPRSlackThread(pr.number);
+        if (prThread && prThread.channelId === channelId) {
+          messageOptions.thread_ts = prThread.threadTs;
+        } else if (threadTs) {
+          // Fall back to threading under the original issue request
+          messageOptions.thread_ts = threadTs;
+        }
+      } else if (threadTs) {
+        // For opened PRs, thread under the original issue request
         messageOptions.thread_ts = threadTs;
       }
 
-      await app.client.chat.postMessage(messageOptions);
+      const result = await app.client.chat.postMessage(messageOptions);
 
-      console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}${threadTs ? ' (threaded)' : ''}`);
+      // For opened PRs, save the message ts so merge can thread under it
+      if (action === 'opened' && result.ts) {
+        await savePRSlackThread(pr.number, channelId, result.ts);
+      }
+
+      console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}${messageOptions.thread_ts ? ' (threaded)' : ''}`);
     } catch (error) {
       console.error(`Failed to notify for issue #${issueNumber}:`, error.message);
     }
@@ -208,13 +259,33 @@ async function handleGitHubWebhook(event, payload) {
     try {
       const { blocks, message } = buildPRNotificationBlocks(pr, action);
 
-      await app.client.chat.postMessage({
+      // For merged PRs, check if we have a thread to reply to
+      let threadTs = null;
+      if (action === 'closed' && pr.merged) {
+        const prThread = await getPRSlackThread(pr.number);
+        if (prThread) {
+          threadTs = prThread.threadTs;
+        }
+      }
+
+      const messageOptions = {
         channel: PR_NOTIFICATION_CHANNEL,
         text: `${message}: ${pr.title}`,
         blocks,
-      });
+      };
 
-      console.log(`Notified ${PR_NOTIFICATION_CHANNEL} about PR #${pr.number} (no Slack-created issue linked)`);
+      if (threadTs) {
+        messageOptions.thread_ts = threadTs;
+      }
+
+      const result = await app.client.chat.postMessage(messageOptions);
+
+      // For opened PRs, save the message ts so merge can thread under it
+      if (action === 'opened' && result.ts) {
+        await savePRSlackThread(pr.number, PR_NOTIFICATION_CHANNEL, result.ts);
+      }
+
+      console.log(`Notified ${PR_NOTIFICATION_CHANNEL} about PR #${pr.number}${threadTs ? ' (threaded)' : ''}`);
     } catch (error) {
       console.error(`Failed to notify ${PR_NOTIFICATION_CHANNEL}:`, error.message);
     }
