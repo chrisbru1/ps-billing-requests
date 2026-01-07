@@ -3,6 +3,7 @@ require('dotenv').config();
 const { App } = require('@slack/bolt');
 const { Octokit } = require('@octokit/rest');
 const http = require('http');
+const crypto = require('crypto');
 
 // Initialize Slack Bolt app with Socket Mode
 const app = new App({
@@ -12,10 +13,163 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
-// Simple HTTP server for Heroku health checks
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Billing Requests app is running');
+// Verify GitHub webhook signature
+function verifyGitHubSignature(payload, signature) {
+  if (!process.env.GITHUB_WEBHOOK_SECRET) return true; // Skip if not configured
+  if (!signature) return false;
+
+  const hmac = crypto.createHmac('sha256', process.env.GITHUB_WEBHOOK_SECRET);
+  const digest = 'sha256=' + hmac.update(payload).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+}
+
+// Extract Slack channel ID from issue body
+function extractSlackChannel(issueBody) {
+  const match = issueBody?.match(/<!-- slack_channel:(\w+) -->/);
+  return match ? match[1] : null;
+}
+
+// Extract issue numbers from PR body (looks for "Fixes #123", "Closes #123", etc.)
+function extractLinkedIssues(prBody) {
+  if (!prBody) return [];
+  const patterns = [
+    /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*#(\d+)/gi,
+    /#(\d+)/g // Also match plain issue references
+  ];
+
+  const issues = new Set();
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(prBody)) !== null) {
+      issues.add(parseInt(match[1], 10));
+    }
+  }
+  return Array.from(issues);
+}
+
+// Handle GitHub webhook events
+async function handleGitHubWebhook(event, payload) {
+  if (event !== 'pull_request') return;
+
+  const action = payload.action;
+  const pr = payload.pull_request;
+
+  // Only handle PR opened and merged events
+  if (action !== 'opened' && !(action === 'closed' && pr.merged)) return;
+
+  // Extract linked issue numbers from PR body
+  const linkedIssues = extractLinkedIssues(pr.body);
+  if (linkedIssues.length === 0) return;
+
+  // For each linked issue, try to notify the Slack channel
+  for (const issueNumber of linkedIssues) {
+    try {
+      // Fetch the issue to get the Slack channel from the body
+      const { data: issue } = await octokit.issues.get({
+        owner: GITHUB_OWNER,
+        repo: GITHUB_REPO,
+        issue_number: issueNumber,
+      });
+
+      const channelId = extractSlackChannel(issue.body);
+      if (!channelId) continue;
+
+      // Build notification message
+      let message, emoji;
+      if (action === 'opened') {
+        emoji = ':pr:';
+        message = `*Pull request opened for issue #${issueNumber}*`;
+      } else {
+        emoji = ':merged:';
+        message = `*Pull request merged for issue #${issueNumber}*`;
+      }
+
+      // Send notification to Slack
+      await app.client.chat.postMessage({
+        channel: channelId,
+        text: `${message}: ${pr.title}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `${emoji || ':github:'} ${message}`,
+            },
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*Issue:*\n<${issue.html_url}|#${issueNumber}: ${issue.title}>`,
+              },
+              {
+                type: 'mrkdwn',
+                text: `*PR:*\n<${pr.html_url}|#${pr.number}: ${pr.title}>`,
+              },
+            ],
+          },
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: `${action === 'opened' ? 'Opened' : 'Merged'} by ${pr.user.login}`,
+              },
+            ],
+          },
+        ],
+      });
+
+      console.log(`Notified channel ${channelId} about PR #${pr.number} for issue #${issueNumber}`);
+    } catch (error) {
+      console.error(`Failed to notify for issue #${issueNumber}:`, error.message);
+    }
+  }
+}
+
+// HTTP server for health checks and GitHub webhooks
+const server = http.createServer(async (req, res) => {
+  // Health check endpoint
+  if (req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Billing Requests app is running');
+    return;
+  }
+
+  // GitHub webhook endpoint
+  if (req.method === 'POST' && req.url === '/github-webhook') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        // Verify signature
+        const signature = req.headers['x-hub-signature-256'];
+        if (!verifyGitHubSignature(body, signature)) {
+          res.writeHead(401, { 'Content-Type': 'text/plain' });
+          res.end('Invalid signature');
+          return;
+        }
+
+        const event = req.headers['x-github-event'];
+        const payload = JSON.parse(body);
+
+        // Process webhook asynchronously
+        handleGitHubWebhook(event, payload).catch(console.error);
+
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      } catch (error) {
+        console.error('Webhook error:', error);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal error');
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
 });
 
 // Initialize GitHub client
@@ -325,7 +479,9 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
     issueBody += `---\n`;
     issueBody += `**Priority:** ${priority.charAt(0).toUpperCase() + priority.slice(1)}\n`;
     issueBody += `**Type:** ${type.charAt(0).toUpperCase() + type.slice(1)}\n`;
-    issueBody += `**Submitted via:** Slack by <@${userId}>`;
+    issueBody += `**Submitted via:** Slack by <@${userId}>\n\n`;
+    // Hidden metadata for webhook notifications (HTML comment not rendered in GitHub)
+    issueBody += `<!-- slack_channel:${channelId} -->`;
 
     // Create labels array
     const labels = [type, priority];

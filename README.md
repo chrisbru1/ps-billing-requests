@@ -4,10 +4,13 @@ A Slack app that helps finance and operations teams submit structured feature re
 
 ## Features
 
-- `/billing-request` slash command opens a modal form
+- `/billingapp-request` slash command opens a modal form
 - Captures: Title, Type, Priority, Description, Steps to Reproduce (for bugs), Acceptance Criteria, and Attachments info
 - Automatically creates a formatted GitHub Issue with appropriate labels
 - Sends confirmation message with link to the created issue
+- **PR Notifications**: Notifies the originating Slack channel when:
+  - A pull request is opened that references the issue
+  - A pull request is merged that closes the issue
 
 ## Prerequisites
 
@@ -87,7 +90,18 @@ Make sure the following labels exist in your `chrisbru1/psbillingapp` repository
 
 To create labels, go to your repo > Issues > Labels > New label
 
-### 5. Environment Variables
+### 5. Set Up GitHub Webhook (for PR notifications)
+
+1. Go to your GitHub repository (`chrisbru1/psbillingapp`)
+2. Click **Settings** > **Webhooks** > **Add webhook**
+3. Configure:
+   - **Payload URL**: `https://your-heroku-app.herokuapp.com/github-webhook`
+   - **Content type**: `application/json`
+   - **Secret**: Create a secure random string (save this as `GITHUB_WEBHOOK_SECRET`)
+   - **Events**: Select "Let me select individual events" and check only **Pull requests**
+4. Click **Add webhook**
+
+### 6. Environment Variables
 
 Create a `.env` file in the project root:
 
@@ -96,6 +110,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_SIGNING_SECRET=your-signing-secret
 SLACK_APP_TOKEN=xapp-your-app-token
 GITHUB_TOKEN=ghp_your-github-token
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
 PORT=3000
 ```
 
@@ -128,6 +143,7 @@ heroku config:set SLACK_BOT_TOKEN=xoxb-your-bot-token
 heroku config:set SLACK_SIGNING_SECRET=your-signing-secret
 heroku config:set SLACK_APP_TOKEN=xapp-your-app-token
 heroku config:set GITHUB_TOKEN=ghp_your-github-token
+heroku config:set GITHUB_WEBHOOK_SECRET=your-webhook-secret
 
 # Deploy
 git push heroku main
@@ -141,7 +157,7 @@ git push heroku main
 
 ## Usage
 
-1. In any Slack channel or DM, type `/billing-request`
+1. In any Slack channel or DM, type `/billingapp-request`
 2. Fill out the modal form:
    - **Title**: Brief summary of the request
    - **Type**: Bug, Feature, or Enhancement
@@ -151,7 +167,8 @@ git push heroku main
    - **Acceptance Criteria**: What success looks like
    - **Attachments Info**: (Optional) Reference any files to attach on GitHub
 3. Click **Submit**
-4. Receive a DM with confirmation and link to the GitHub issue
+4. Confirmation message posted to the channel with link to the GitHub issue
+5. When a PR is opened or merged referencing the issue, the channel receives a notification
 
 ## Project Structure
 
@@ -179,6 +196,12 @@ ps-billing-requests/
 
 ### Permission errors
 - Re-install the app to your workspace to update scopes
+
+### PR notifications not working
+- Verify the GitHub webhook is configured with the correct URL (`/github-webhook` path)
+- Check that `GITHUB_WEBHOOK_SECRET` matches the secret in GitHub webhook settings
+- Ensure the PR body contains a reference to the issue (e.g., "Fixes #123" or "Closes #123")
+- The issue must have been created through this Slack app (contains the channel metadata)
 - Verify bot token scopes include `chat:write`, `commands`, `im:write`
 
 ## License
