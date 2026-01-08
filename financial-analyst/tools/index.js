@@ -1,7 +1,10 @@
 // Tool Registry and Executor
 
 const googleSheets = require('./google-sheets');
-const rillet = require('./rillet');
+const { getRilletMCPClient } = require('./rillet-mcp');
+
+// Rillet API base URL
+const RILLET_API_BASE = process.env.RILLET_API_BASE_URL || 'https://api.rillet.com';
 
 // Map tool names to their implementations
 const toolImplementations = {
@@ -10,7 +13,7 @@ const toolImplementations = {
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
   'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),
 
-  // Direct Rillet API tool - simpler and more efficient
+  // Direct Rillet API via MCP execute-request
   'call_rillet_api': async (input) => {
     const { endpoint, params = {} } = input;
 
@@ -21,44 +24,25 @@ const toolImplementations = {
       };
     }
 
-    // Route to appropriate Rillet method based on endpoint
-    if (endpoint === '/accounts' || endpoint === 'accounts') {
-      return rillet.getAccounts();
-    }
+    // Build the full URL with query params
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = new URL(`${RILLET_API_BASE}${cleanEndpoint}`);
 
-    if (endpoint === '/journal-entries' || endpoint === 'journal-entries') {
-      return rillet.getJournalEntries({
-        start_date: params.created_at_min,
-        end_date: params.created_at_max,
-        subsidiary: params.subsidiary
-      });
-    }
+    // Add query parameters
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.append(key, value);
+      }
+    });
 
-    if (endpoint === '/reports/arr-waterfall' || endpoint === 'reports/arr-waterfall' || endpoint === 'arr-waterfall') {
-      return rillet.getARRWaterfall({
-        month: params.month,
-        status: params.status,
-        breakdown: params.breakdown,
-        subsidiary: params.subsidiary
-      });
-    }
-
-    if (endpoint === '/bank-accounts' || endpoint === 'bank-accounts') {
-      return rillet.getBankAccounts({
-        subsidiary: params.subsidiary
-      });
-    }
-
-    if (endpoint === '/books/periods/last-closed' || endpoint === 'books/periods/last-closed' || endpoint === 'last-closed-period') {
-      return rillet.getLastClosedPeriod();
-    }
-
-    // Unknown endpoint
-    return {
-      error: `Unknown Rillet endpoint: ${endpoint}`,
-      is_error: true,
-      hint: 'Available endpoints: /accounts, /journal-entries, /reports/arr-waterfall, /bank-accounts, /books/periods/last-closed'
-    };
+    // Use MCP's execute-request to make the actual API call
+    const mcpClient = getRilletMCPClient();
+    return mcpClient.callTool('execute-request', {
+      harRequest: {
+        method: 'GET',
+        url: url.toString()
+      }
+    });
   }
 };
 
