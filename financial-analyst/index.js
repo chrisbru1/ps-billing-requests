@@ -8,6 +8,56 @@ const { SYSTEM_PROMPT, TOOL_DEFINITIONS } = require('./config');
 // Maximum iterations to prevent infinite tool loops
 const MAX_TOOL_ITERATIONS = 10;
 
+// In-memory conversation store by thread
+// Key: threadTs, Value: { messages: [], lastActivity: Date }
+const conversationStore = new Map();
+
+// Clean up old conversations (older than 1 hour)
+const CONVERSATION_TTL_MS = 60 * 60 * 1000;
+
+function cleanupOldConversations() {
+  const now = Date.now();
+  for (const [threadTs, conv] of conversationStore.entries()) {
+    if (now - conv.lastActivity > CONVERSATION_TTL_MS) {
+      conversationStore.delete(threadTs);
+    }
+  }
+}
+
+// Run cleanup every 10 minutes
+setInterval(cleanupOldConversations, 10 * 60 * 1000);
+
+/**
+ * Get or create conversation history for a thread
+ * @param {string} threadTs - Thread timestamp
+ * @returns {Array} - Message history
+ */
+function getConversation(threadTs) {
+  if (!threadTs) return [];
+
+  const conv = conversationStore.get(threadTs);
+  return conv ? conv.messages : [];
+}
+
+/**
+ * Save conversation history for a thread
+ * @param {string} threadTs - Thread timestamp
+ * @param {Array} messages - Full message history
+ */
+function saveConversation(threadTs, messages) {
+  if (!threadTs) return;
+
+  // Only keep the last few exchanges to manage context size
+  // Each exchange = user message + assistant response
+  const maxMessages = 20; // ~10 exchanges
+  const trimmedMessages = messages.slice(-maxMessages);
+
+  conversationStore.set(threadTs, {
+    messages: trimmedMessages,
+    lastActivity: Date.now()
+  });
+}
+
 /**
  * Analyze a financial question using Claude with tool use
  * @param {string} question - User's question
@@ -16,9 +66,14 @@ const MAX_TOOL_ITERATIONS = 10;
  */
 async function analyze(question, context = {}) {
   const claude = new ClaudeClient();
+  const { threadTs } = context;
 
-  // Build initial messages
+  // Get existing conversation history for this thread
+  const existingMessages = getConversation(threadTs);
+
+  // Build messages - start with history, add new question
   const messages = [
+    ...existingMessages,
     {
       role: 'user',
       content: question
@@ -88,6 +143,15 @@ async function analyze(question, context = {}) {
 
         console.log(`[FPA Bot] Analysis complete after ${iteration} iteration(s)`);
 
+        // Save the final user message and assistant response for conversation continuity
+        // Only save the user's question and Claude's final text response (not tool use iterations)
+        const conversationToSave = [
+          ...existingMessages,
+          { role: 'user', content: question },
+          { role: 'assistant', content: textContent }
+        ];
+        saveConversation(threadTs, conversationToSave);
+
         // Format for Slack
         return formatResponse(textContent);
       }
@@ -139,7 +203,18 @@ function checkConfiguration() {
   };
 }
 
+/**
+ * Clear conversation history for a thread
+ * @param {string} threadTs - Thread timestamp
+ */
+function clearConversation(threadTs) {
+  if (threadTs) {
+    conversationStore.delete(threadTs);
+  }
+}
+
 module.exports = {
   analyze,
-  checkConfiguration
+  checkConfiguration,
+  clearConversation
 };

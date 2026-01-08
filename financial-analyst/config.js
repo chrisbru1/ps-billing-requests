@@ -30,7 +30,19 @@ You also have access to Google Sheets for:
 - Budget data (synced from Aleph FP&A)
 - Financial model with projections and scenarios
 
-**IMPORTANT:** Always use list_rillet_tools FIRST to discover what Rillet tools are available, then use call_rillet_tool to execute them. Do not assume what tools exist.
+## Rillet API Reference
+
+The following Rillet endpoints are available via the call_rillet_api tool:
+
+**GET /accounts** - Chart of accounts (all GL accounts with codes, names, types)
+**GET /journal-entries** - Journal entries with line items (debits/credits by account)
+  - Query params: created_at_min, created_at_max, limit, cursor
+**GET /reports/arr-waterfall** - ARR waterfall report showing MRR changes
+  - Query params: month (YYYY-MM format), status, breakdown, subsidiary
+**GET /bank-accounts** - Bank account balances and info
+**GET /books/periods/last-closed** - Last closed accounting period
+
+**Note:** Rillet does not have direct balance endpoints. To get account balances, fetch journal entries and sum debits/credits by account. For liability/equity/revenue accounts: balance = credits - debits. For asset/expense accounts: balance = debits - credits.
 
 ## How to Behave
 
@@ -150,32 +162,23 @@ If you can't answer a question:
 You are a trusted member of the Finance team. Be accurate, be insightful, and help the team make better decisions with data.`;
 
 const TOOL_DEFINITIONS = [
-  // Rillet MCP tools - dynamic discovery and calling
+  // Direct Rillet API tool - simpler and more efficient than MCP discovery
   {
-    name: 'list_rillet_tools',
-    description: 'Discovers all available tools from Rillet MCP server. Use this FIRST to see what financial data and reports are available from Rillet before calling specific tools. This will show you tools for balance sheets, income statements, journal entries, ARR waterfall, and more.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: 'call_rillet_tool',
-    description: 'Calls a specific Rillet MCP tool by name. Use list_rillet_tools first to discover available tools and their parameters. This allows access to financial reports, account balances, journal entries, and other data from Rillet.',
+    name: 'call_rillet_api',
+    description: 'Makes a direct API call to Rillet ERP. See the Rillet API Reference in the system prompt for available endpoints.',
     input_schema: {
       type: 'object',
       properties: {
-        tool_name: {
+        endpoint: {
           type: 'string',
-          description: 'The name of the Rillet MCP tool to call (from list_rillet_tools)'
+          description: 'The API endpoint path (e.g., "/accounts", "/journal-entries", "/reports/arr-waterfall")'
         },
-        arguments: {
+        params: {
           type: 'object',
-          description: 'Arguments to pass to the tool (based on the tool\'s input schema from list_rillet_tools)'
+          description: 'Query parameters to pass (e.g., { "month": "2024-12", "limit": 100 })'
         }
       },
-      required: ['tool_name']
+      required: ['endpoint']
     }
   },
   // Google Sheets tools for budget and model

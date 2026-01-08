@@ -813,10 +813,11 @@ app.command('/fpabot', async ({ command, ack, client, logger }) => {
 
     logger.info(`[FPA Bot] Processing question from ${command.user_id}: ${question.substring(0, 100)}...`);
 
-    // Process with financial analyst
+    // Process with financial analyst (use thinkingMsg.ts as the thread for conversation continuity)
     const response = await financialAnalyst.analyze(question, {
       userId: command.user_id,
-      channelId: command.channel_id
+      channelId: command.channel_id,
+      threadTs: thinkingMsg.ts
     });
 
     // Update the "thinking" message with the actual response
@@ -864,6 +865,80 @@ app.command('/fpabot', async ({ command, ack, client, logger }) => {
           }
         }
       ]
+    });
+  }
+});
+
+// Handle thread replies to FPA Bot messages
+// This enables conversation continuity - users can reply in the thread to ask follow-up questions
+app.message(async ({ message, client, logger }) => {
+  // Only process messages that are in a thread (have thread_ts)
+  if (!message.thread_ts) return;
+
+  // Ignore bot messages to prevent loops
+  if (message.bot_id || message.subtype === 'bot_message') return;
+
+  // Only respond in FPA channels
+  if (!FPA_CHANNEL_IDS.includes(message.channel)) return;
+
+  // Check if the thread was started by the bot (our messages have the question context)
+  // We look for threads where we've previously responded
+  try {
+    // Get the parent message to verify it's an FPA Bot thread
+    const result = await client.conversations.replies({
+      channel: message.channel,
+      ts: message.thread_ts,
+      limit: 1
+    });
+
+    const parentMessage = result.messages?.[0];
+    if (!parentMessage) return;
+
+    // Check if parent message has our FPA Bot signature (context block with "asked:")
+    const hasContext = parentMessage.blocks?.some(block =>
+      block.type === 'context' &&
+      block.elements?.some(el => el.text?.includes('asked:'))
+    );
+
+    if (!hasContext) return;
+
+    const question = message.text?.trim();
+    if (!question) return;
+
+    logger.info(`[FPA Bot] Thread reply from ${message.user}: ${question.substring(0, 100)}...`);
+
+    // Post thinking indicator in the thread
+    const thinkingMsg = await client.chat.postMessage({
+      channel: message.channel,
+      thread_ts: message.thread_ts,
+      text: ':hourglass_flowing_sand: Analyzing...'
+    });
+
+    // Process with financial analyst (pass the original thread_ts to maintain conversation history)
+    const response = await financialAnalyst.analyze(question, {
+      userId: message.user,
+      channelId: message.channel,
+      threadTs: message.thread_ts
+    });
+
+    // Update thinking message with response
+    await client.chat.update({
+      channel: message.channel,
+      ts: thinkingMsg.ts,
+      text: response.text,
+      blocks: response.blocks
+    });
+
+    logger.info(`[FPA Bot] Thread reply response sent to ${message.user}`);
+
+  } catch (error) {
+    logger.error('[FPA Bot] Error handling thread reply:', error);
+
+    // Post error message in thread
+    await client.chat.postMessage({
+      channel: message.channel,
+      thread_ts: message.thread_ts,
+      text: ':warning: Sorry, I encountered an error processing your follow-up question. Please try again.'
     });
   }
 });

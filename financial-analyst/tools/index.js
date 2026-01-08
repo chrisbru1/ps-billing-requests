@@ -1,7 +1,7 @@
 // Tool Registry and Executor
 
 const googleSheets = require('./google-sheets');
-const { getRilletMCPClient } = require('./rillet-mcp');
+const rillet = require('./rillet');
 
 // Map tool names to their implementations
 const toolImplementations = {
@@ -10,14 +10,55 @@ const toolImplementations = {
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
   'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),
 
-  // Rillet MCP tools - dynamic discovery and calling
-  'list_rillet_tools': async () => {
-    const mcpClient = getRilletMCPClient();
-    return mcpClient.listTools();
-  },
-  'call_rillet_tool': async (input) => {
-    const mcpClient = getRilletMCPClient();
-    return mcpClient.callTool(input.tool_name, input.arguments || {});
+  // Direct Rillet API tool - simpler and more efficient
+  'call_rillet_api': async (input) => {
+    const { endpoint, params = {} } = input;
+
+    if (!endpoint) {
+      return {
+        error: 'endpoint is required',
+        is_error: true
+      };
+    }
+
+    // Route to appropriate Rillet method based on endpoint
+    if (endpoint === '/accounts' || endpoint === 'accounts') {
+      return rillet.getAccounts();
+    }
+
+    if (endpoint === '/journal-entries' || endpoint === 'journal-entries') {
+      return rillet.getJournalEntries({
+        start_date: params.created_at_min,
+        end_date: params.created_at_max,
+        subsidiary: params.subsidiary
+      });
+    }
+
+    if (endpoint === '/reports/arr-waterfall' || endpoint === 'reports/arr-waterfall' || endpoint === 'arr-waterfall') {
+      return rillet.getARRWaterfall({
+        month: params.month,
+        status: params.status,
+        breakdown: params.breakdown,
+        subsidiary: params.subsidiary
+      });
+    }
+
+    if (endpoint === '/bank-accounts' || endpoint === 'bank-accounts') {
+      return rillet.getBankAccounts({
+        subsidiary: params.subsidiary
+      });
+    }
+
+    if (endpoint === '/books/periods/last-closed' || endpoint === 'books/periods/last-closed' || endpoint === 'last-closed-period') {
+      return rillet.getLastClosedPeriod();
+    }
+
+    // Unknown endpoint
+    return {
+      error: `Unknown Rillet endpoint: ${endpoint}`,
+      is_error: true,
+      hint: 'Available endpoints: /accounts, /journal-entries, /reports/arr-waterfall, /bank-accounts, /books/periods/last-closed'
+    };
   }
 };
 
