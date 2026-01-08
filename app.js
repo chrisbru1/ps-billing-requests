@@ -749,75 +749,111 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
   }
 });
 
-// Handle @mentions for FPA Financial Analyst Bot
-app.event('app_mention', async ({ event, client, logger }) => {
+// Handle /fpabot slash command for FPA Financial Analyst
+app.command('/fpabot', async ({ command, ack, client, logger }) => {
+  // Acknowledge immediately (Slack requires response within 3 seconds)
+  await ack();
+
   // SECURITY: Only respond in the designated FPA channel
   if (!FPA_CHANNEL_ID) {
-    logger.warn('FPA_CHANNEL_ID not configured - ignoring app_mention');
+    logger.warn('FPA_CHANNEL_ID not configured');
+    await client.chat.postEphemeral({
+      channel: command.channel_id,
+      user: command.user_id,
+      text: ':warning: FPA Bot is not configured. Please contact the administrator.'
+    });
     return;
   }
 
-  if (event.channel !== FPA_CHANNEL_ID) {
-    logger.info(`Ignoring app_mention in non-FPA channel: ${event.channel}`);
+  if (command.channel_id !== FPA_CHANNEL_ID) {
+    await client.chat.postEphemeral({
+      channel: command.channel_id,
+      user: command.user_id,
+      text: ':lock: This command is only available in the #fpa channel.'
+    });
     return;
   }
 
-  // Extract the question (remove the bot mention)
-  const question = event.text.replace(/<@[A-Z0-9]+>/gi, '').trim();
+  const question = command.text.trim();
 
+  // If no question provided, show help
   if (!question) {
-    await client.chat.postMessage({
-      channel: event.channel,
-      thread_ts: event.ts,
-      text: 'Hi! I\'m the FP&A Financial Analyst. Ask me questions about our budget, financial model, or actuals.\n\nFor example:\n• "What\'s our Q4 revenue vs budget?"\n• "Show me operating expenses by department"\n• "What are the key assumptions in our model?"'
+    await client.chat.postEphemeral({
+      channel: command.channel_id,
+      user: command.user_id,
+      text: '*FPA Financial Analyst*\n\nUsage: `/fpabot <your question>`\n\nExamples:\n• `/fpabot What are our revenue projections for Q1?`\n• `/fpabot Show me the assumptions in our financial model`\n• `/fpabot What\'s our current cash position?`\n• `/fpabot help` - Show full guide'
     });
     return;
   }
 
   try {
-    // Post "thinking" indicator
+    // Post "thinking" indicator as a visible message
     const thinkingMsg = await client.chat.postMessage({
-      channel: event.channel,
-      thread_ts: event.ts,
-      text: ':hourglass_flowing_sand: Analyzing your question...',
+      channel: command.channel_id,
+      text: `:hourglass_flowing_sand: <@${command.user_id}> asked: "${question.substring(0, 100)}${question.length > 100 ? '...' : ''}"`,
       blocks: [
+        {
+          type: 'context',
+          elements: [{
+            type: 'mrkdwn',
+            text: `<@${command.user_id}> asked: _${question}_`
+          }]
+        },
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: ':hourglass_flowing_sand: *Analyzing your question...*\n\nQuerying financial data sources. This may take a moment.'
+            text: ':hourglass_flowing_sand: *Analyzing...*'
           }
         }
       ]
     });
 
-    logger.info(`[FPA Bot] Processing question from ${event.user}: ${question.substring(0, 100)}...`);
+    logger.info(`[FPA Bot] Processing question from ${command.user_id}: ${question.substring(0, 100)}...`);
 
     // Process with financial analyst
     const response = await financialAnalyst.analyze(question, {
-      userId: event.user,
-      threadTs: event.ts
+      userId: command.user_id,
+      channelId: command.channel_id
     });
 
     // Update the "thinking" message with the actual response
+    // Prepend the question context to the response blocks
+    const responseBlocks = [
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: `<@${command.user_id}> asked: _${question}_`
+        }]
+      },
+      { type: 'divider' },
+      ...response.blocks
+    ];
+
     await client.chat.update({
-      channel: event.channel,
+      channel: command.channel_id,
       ts: thinkingMsg.ts,
       text: response.text,
-      blocks: response.blocks
+      blocks: responseBlocks
     });
 
-    logger.info(`[FPA Bot] Successfully responded to ${event.user}`);
+    logger.info(`[FPA Bot] Successfully responded to ${command.user_id}`);
 
   } catch (error) {
     logger.error('[FPA Bot] Error processing question:', error);
 
-    // Post error message in thread
     await client.chat.postMessage({
-      channel: event.channel,
-      thread_ts: event.ts,
-      text: ':x: Sorry, I encountered an error analyzing your question. Please try again or contact the FP&A team.',
+      channel: command.channel_id,
+      text: ':x: Sorry, I encountered an error analyzing your question. Please try again.',
       blocks: [
+        {
+          type: 'context',
+          elements: [{
+            type: 'mrkdwn',
+            text: `<@${command.user_id}> asked: _${question}_`
+          }]
+        },
         {
           type: 'section',
           text: {
