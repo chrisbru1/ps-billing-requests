@@ -13,6 +13,18 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
+// Initialize GitHub client (must be before functions that use it)
+const octokit = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
+});
+
+// GitHub repo configuration
+const GITHUB_OWNER = 'chrisbru1';
+const GITHUB_REPO = 'psbillingapp';
+
+// Slack channel for non-Slack-created PR notifications
+const PR_NOTIFICATION_CHANNEL = process.env.PR_NOTIFICATION_CHANNEL || 'ps-billing-app-testing';
+
 // Verify GitHub webhook signature
 function verifyGitHubSignature(payload, signature) {
   if (!process.env.GITHUB_WEBHOOK_SECRET) return true; // Skip if not configured
@@ -170,15 +182,18 @@ async function getPRSlackThread(prNumber) {
 
 // Save Slack thread info to PR comment (for threading merge under open notification)
 async function savePRSlackThread(prNumber, channelId, threadTs) {
+  console.log(`Saving Slack thread info for PR #${prNumber}: channel=${channelId}, ts=${threadTs}`);
   try {
-    await octokit.issues.createComment({
+    const result = await octokit.issues.createComment({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
       issue_number: prNumber,
       body: `Slack notification sent.\n\n<!-- slack_pr_channel:${channelId} -->\n<!-- slack_pr_thread_ts:${threadTs} -->`,
     });
+    console.log(`Successfully saved PR Slack thread comment for #${prNumber}, comment ID: ${result.data.id}`);
   } catch (error) {
     console.error(`Failed to save PR Slack thread for #${prNumber}:`, error.message);
+    console.error('Full error:', error);
   }
 }
 
@@ -335,18 +350,6 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
-
-// Initialize GitHub client
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-});
-
-// GitHub repo configuration
-const GITHUB_OWNER = 'chrisbru1';
-const GITHUB_REPO = 'psbillingapp';
-
-// Slack channel for non-Slack-created PR notifications
-const PR_NOTIFICATION_CHANNEL = process.env.PR_NOTIFICATION_CHANNEL || 'ps-billing-app-testing';
 
 // Build the modal view
 function buildModalView(showStepsToReproduce = false) {
