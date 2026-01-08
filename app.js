@@ -82,6 +82,9 @@ function buildPRNotificationBlocks(pr, action, issueInfo = null) {
   let prBody = pr.body || '_No description provided_';
   // Remove the issue reference patterns from the body for cleaner display
   prBody = prBody.replace(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*#\d+/gi, '').trim();
+  // Remove Claude Code generated footer
+  prBody = prBody.replace(/🤖\s*Generated with \[Claude Code\]\(https:\/\/claude\.com\/claude-code\)/gi, '').trim();
+  prBody = prBody.replace(/Co-Authored-By:.*$/gim, '').trim();
   if (prBody.length > 1500) {
     prBody = prBody.substring(0, 1500) + '...';
   }
@@ -240,6 +243,8 @@ async function handleGitHubWebhook(event, payload) {
         channel: channelId,
         text: `${message}: ${pr.title}`,
         blocks,
+        unfurl_links: false,
+        unfurl_media: false,
       };
 
       // For merged PRs, try to thread under the "opened" notification first
@@ -287,6 +292,8 @@ async function handleGitHubWebhook(event, payload) {
         channel: PR_NOTIFICATION_CHANNEL,
         text: `${message}: ${pr.title}`,
         blocks,
+        unfurl_links: false,
+        unfurl_media: false,
       };
 
       if (threadTs) {
