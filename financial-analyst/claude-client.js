@@ -5,7 +5,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 class ClaudeClient {
   constructor() {
     this.client = null;
-    this.model = 'claude-sonnet-4-20250514'; // Good balance of speed and capability for analysis
+    this.model = 'claude-opus-4-20250514'; // Opus 4.5 for superior financial analysis
   }
 
   initialize() {

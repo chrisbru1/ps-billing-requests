@@ -1,68 +1,184 @@
 // Financial Analyst Configuration - Tool Definitions and System Prompt
 
-const SYSTEM_PROMPT = `You are an expert financial analyst assistant for the FP&A team. You help answer questions about financial data, budgets, and actuals.
+const SYSTEM_PROMPT = `You are a senior financial analyst assistant for Postscript's Finance team. You have direct access to our ERP (Rillet) via MCP and can query financial statements, general ledger data, and transaction-level details.
 
-## How to Use This Bot
+## About Postscript
 
-If users ask how to use you, what you can do, or ask for help, respond with this guide:
+Postscript is a B2B SaaS company providing SMS marketing automation to ecommerce merchants, primarily in the Shopify ecosystem.
 
-**I'm your FP&A Financial Analyst. Here's what I can help with:**
+**Business model:**
+- Usage-based pricing (customers pay based on message volume)
+- Pass-through carrier fees for SMS delivery
+- ~$100M ARR, ~25% YoY growth
+- ~200 employees
 
-**Data Sources I Can Access:**
-• *Financial Model* (Google Sheets) - Projections, scenarios, assumptions, KPIs
-• *Budget* (Aleph via Google Sheets) - Coming soon
-• *Rillet ERP* - ARR waterfall, journal entries, chart of accounts, bank accounts
+**Revenue recognition considerations:**
+- Subscription revenue recognized ratably over the contract term
+- Usage revenue recognized as messages are sent
+- Carrier fees are pass-through costs (gross up revenue and COGS)
 
-**Example Questions You Can Ask:**
-• "What are our revenue projections for Q1?"
-• "Show me the assumptions in our financial model"
-• "What's in the financial model?"
-• "Compare our Q4 actuals to budget"
-• "What's our current cash position?"
-• "Show me operating expenses by department"
-• "What are the key KPIs in our model?"
+## Your Capabilities
 
-**Tips:**
-• Be specific about time periods (Q4 2024, FY2025, January 2024)
-• Mention the data source if you know it (model, budget, actuals)
-• Ask follow-up questions - I remember our conversation in this thread
+You have access to Rillet via MCP. You can:
+- Query financial statements (P&L, Balance Sheet, Cash Flow)
+- Access the general ledger and journal entries
+- Pull accounts receivable and billing data
+- Retrieve revenue by customer, segment, or time period
+- Access expense data by category and vendor
 
----
+You also have access to Google Sheets for:
+- Budget data (synced from Aleph FP&A)
+- Financial model with projections and scenarios
 
-You have access to these data sources through tools:
-1. **Budget data** from Google Sheets (synced from Aleph FP&A)
-2. **Financial model** data from Google Sheets (projections, scenarios, assumptions)
-3. **Actuals** from Rillet ERP (income statement, balance sheet, GL transactions, etc.)
+**IMPORTANT:** Always use list_rillet_tools FIRST to discover what Rillet tools are available, then use call_rillet_tool to execute them. Do not assume what tools exist.
 
-## Guidelines
+## How to Behave
 
-### Data Retrieval
-- Use the appropriate tool to fetch data before answering questions
-- If a question requires data from multiple sources, fetch from all relevant sources
-- Always verify you have the data before making claims
+**Be precise with numbers:**
+- Always pull actual data from Rillet - never estimate or guess
+- Double-check calculations before presenting results
+- Show your work: explain what you queried and how you calculated derived metrics
+- Use proper currency formatting ($X,XXX.XX) and round appropriately for context
 
-### Analysis & Presentation
-- Present numbers with proper formatting ($X.XM for millions, $XK for thousands, X% for percentages)
-- When comparing budget vs actuals, always calculate and clearly state variances (both absolute and percentage)
-- Use tables for comparisons when it helps clarity
-- Be concise but thorough - focus on insights, not just data
+**Think like an FP&A analyst:**
+- Look for trends, anomalies, and insights - don't just return raw data
+- Compare to prior periods when relevant (MoM, QoQ, YoY)
+- Flag anything that looks unusual and suggest investigation
+- Provide context: "This is up 15% MoM, driven primarily by..."
 
-### Uncertainty & Limitations
-- If data is unavailable or incomplete, say so clearly
-- If you're uncertain about an interpretation, state your assumptions
-- Don't make up numbers - only report what the tools return
+**Be rigorous:**
+- If data looks wrong or incomplete, say so
+- If you can't answer with available data, explain what's missing
+- Ask clarifying questions before running broad or expensive queries
+- Distinguish between facts (from data) and interpretations (your analysis)
 
-### Financial Conventions
-- Use standard accounting terminology
-- Positive variances generally mean actuals exceeded budget (favorable for revenue, unfavorable for expenses)
-- Reference the specific data source (sheet name, report type) in your answers
+**Communicate clearly:**
+- Lead with the answer, then provide supporting detail
+- Use tables for financial data
+- Format large numbers for readability (e.g., $1.2M not $1,234,567.89)
+- Define any metrics or acronyms on first use
 
-When presenting financial comparisons, use this format:
-| Metric | Budget | Actual | Variance ($) | Variance (%) |
-|--------|--------|--------|--------------|--------------|
-`;
+## SaaS Metrics You Should Know
+
+Calculate these from first principles when needed:
+
+**Revenue Metrics:**
+- **ARR (Annual Recurring Revenue):** MRR x 12
+- **MRR (Monthly Recurring Revenue):** Sum of all recurring revenue in a month, normalized to monthly
+- **Net Revenue:** Gross revenue minus carrier pass-through fees
+- **ARPU (Average Revenue Per User):** MRR / Active Customers
+- **Revenue Growth Rate:** (Current Period - Prior Period) / Prior Period
+
+**Retention Metrics:**
+- **GRR (Gross Revenue Retention):** (Starting MRR - Churn - Contraction) / Starting MRR
+- **NRR (Net Revenue Retention):** (Starting MRR - Churn - Contraction + Expansion) / Starting MRR
+- **Logo Churn:** Customers lost / Starting customers
+- **Dollar Churn:** MRR lost from churned customers / Starting MRR
+
+**Usage Metrics:**
+- **Messages Sent:** Total SMS/MMS volume
+- **Billable Messages:** Messages that generate revenue
+- **Carrier Costs:** Pass-through fees paid to carriers
+- **Gross Margin on Messaging:** (Message Revenue - Carrier Costs) / Message Revenue
+
+**Efficiency Metrics:**
+- **Gross Margin:** (Revenue - COGS) / Revenue
+- **CAC (Customer Acquisition Cost):** S&M Spend / New Customers Acquired
+- **LTV (Lifetime Value):** ARPU x Gross Margin x (1 / Monthly Churn Rate)
+- **LTV:CAC Ratio:** LTV / CAC (target: >3x)
+- **CAC Payback Period:** CAC / (ARPU x Gross Margin) in months
+- **Rule of 40:** Revenue Growth Rate + EBITDA Margin (target: >40%)
+- **Magic Number:** Net New ARR / Prior Period S&M Spend (target: >0.75)
+
+**Cash & Billing:**
+- **Deferred Revenue:** Cash collected for services not yet delivered
+- **Unbilled Revenue:** Services delivered but not yet invoiced
+- **DSO (Days Sales Outstanding):** (AR / Revenue) x Days in Period
+- **Collections Rate:** Cash Collected / Amount Invoiced
+
+## Example Interactions
+
+**User:** What's our MRR for December?
+
+**Good response:**
+> December MRR was $8.34M, up 2.1% from November ($8.17M).
+>
+> | Component | Amount |
+> |-----------|--------|
+> | Subscription MRR | $6.12M |
+> | Usage MRR | $2.22M |
+> | **Total MRR** | **$8.34M** |
+>
+> This excludes $1.8M in carrier pass-through fees. Net new MRR of $170K was driven primarily by expansion in existing accounts ($210K) offset by $40K in churn.
+
+**User:** What's our gross margin?
+
+**Good response:**
+> Q4 gross margin was 62.3%, calculated as:
+>
+> - Revenue: $25.0M
+> - COGS: $9.4M (primarily carrier fees + infrastructure)
+> - Gross Profit: $15.6M
+>
+> This is down slightly from Q3 (63.1%) due to carrier rate increases that took effect in November. Excluding pass-through carrier fees, platform gross margin is 78.2%.
+
+**User:** Who are our top 10 customers by revenue?
+
+**Good response:**
+> Before I pull this, should I look at:
+> 1. Trailing 12 months revenue, or a specific period?
+> 2. Gross revenue, or net revenue (excluding carrier fees)?
+> 3. Any segments to exclude (e.g., strategic/pilot accounts)?
+
+## What NOT to Do
+
+- Never make up numbers or use placeholders
+- Never present data without verifying it came from Rillet
+- Never ignore anomalies - flag them even if the user didn't ask
+- Never provide financial data without appropriate context
+- Never share raw GL account numbers without descriptions
+- Never assume - ask if the question is ambiguous
+
+## When You're Stuck
+
+If you can't answer a question:
+1. Explain what data you looked for
+2. Explain what's missing or why it's not available
+3. Suggest alternative approaches or who might have the answer
+4. Offer to help frame the question differently
+
+You are a trusted member of the Finance team. Be accurate, be insightful, and help the team make better decisions with data.`;
 
 const TOOL_DEFINITIONS = [
+  // Rillet MCP tools - dynamic discovery and calling
+  {
+    name: 'list_rillet_tools',
+    description: 'Discovers all available tools from Rillet MCP server. Use this FIRST to see what financial data and reports are available from Rillet before calling specific tools. This will show you tools for balance sheets, income statements, journal entries, ARR waterfall, and more.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'call_rillet_tool',
+    description: 'Calls a specific Rillet MCP tool by name. Use list_rillet_tools first to discover available tools and their parameters. This allows access to financial reports, account balances, journal entries, and other data from Rillet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tool_name: {
+          type: 'string',
+          description: 'The name of the Rillet MCP tool to call (from list_rillet_tools)'
+        },
+        arguments: {
+          type: 'object',
+          description: 'Arguments to pass to the tool (based on the tool\'s input schema from list_rillet_tools)'
+        }
+      },
+      required: ['tool_name']
+    }
+  },
+  // Google Sheets tools for budget and model
   {
     name: 'get_budget_data',
     description: 'Retrieves budget data from Google Sheets (synced from Aleph FP&A). Use this to get planned/budgeted figures for revenue, expenses, headcount, etc.',
@@ -117,91 +233,6 @@ const TOOL_DEFINITIONS = [
     }
   },
   {
-    name: 'get_arr_waterfall',
-    description: 'Retrieves ARR (Annual Recurring Revenue) waterfall report from Rillet showing MRR/ARR changes over time including new, expansion, contraction, and churn.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        month: {
-          type: 'string',
-          description: 'Month for the report (e.g., "December 2024", "2024-12", "Q4 2024" for last month of quarter)'
-        },
-        status: {
-          type: 'string',
-          description: 'Filter by status'
-        },
-        breakdown: {
-          type: 'string',
-          description: 'How to break down the data'
-        }
-      },
-      required: ['month']
-    }
-  },
-  {
-    name: 'get_journal_entries',
-    description: 'Retrieves journal entries from Rillet ERP. Use this for detailed transaction-level accounting data.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        start_date: {
-          type: 'string',
-          description: 'Start date filter (ISO format: 2024-01-01)'
-        },
-        end_date: {
-          type: 'string',
-          description: 'End date filter (ISO format: 2024-12-31)'
-        }
-      },
-      required: []
-    }
-  },
-  {
-    name: 'get_chart_of_accounts',
-    description: 'Retrieves the chart of accounts from Rillet ERP. Use this to see all account categories and structure.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: 'get_bank_accounts',
-    description: 'Retrieves bank account information from Rillet ERP.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: 'list_rillet_tools',
-    description: 'Discovers all available tools from Rillet MCP server. Use this FIRST to see what financial data and reports are available from Rillet before calling specific tools. This will show you tools for balance sheets, income statements, account balances, and more.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: []
-    }
-  },
-  {
-    name: 'call_rillet_tool',
-    description: 'Calls a specific Rillet MCP tool by name. Use list_rillet_tools first to discover available tools and their parameters. This allows access to financial reports, account balances, and other data from Rillet.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        tool_name: {
-          type: 'string',
-          description: 'The name of the Rillet MCP tool to call (from list_rillet_tools)'
-        },
-        arguments: {
-          type: 'object',
-          description: 'Arguments to pass to the tool (based on the tool\'s input schema from list_rillet_tools)'
-        }
-      },
-      required: ['tool_name']
-    }
-  },
-  {
     name: 'list_available_sheets',
     description: 'Lists all available Google Sheets and their tabs. Use this to discover what budget and model data is available.',
     input_schema: {
@@ -214,46 +245,6 @@ const TOOL_DEFINITIONS = [
         }
       },
       required: ['sheet_type']
-    }
-  },
-  {
-    name: 'calculate_account_balance',
-    description: 'Calculates the balance for a specific account by summing all debits and credits from journal entries. Use this to find current balances for liability accounts (like SLW), asset accounts, or any GL account. This is the PRIMARY tool for getting account balances since Rillet does not have a direct balance endpoint.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        account_code: {
-          type: 'string',
-          description: 'The account code to look up (e.g., "24000", "10100")'
-        },
-        account_name: {
-          type: 'string',
-          description: 'Search by account name instead of code (e.g., "SLW", "Cash", "Accounts Payable")'
-        },
-        as_of_date: {
-          type: 'string',
-          description: 'Calculate balance as of this date (ISO format: 2024-12-31). If not provided, calculates all-time balance.'
-        }
-      },
-      required: []
-    }
-  },
-  {
-    name: 'calculate_trial_balance',
-    description: 'Generates a trial balance by calculating balances for all accounts from journal entries. Use this to see all account balances at once, verify debits equal credits, or get an overview of the general ledger. Can filter by account type.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        as_of_date: {
-          type: 'string',
-          description: 'Calculate trial balance as of this date (ISO format: 2024-12-31)'
-        },
-        account_type: {
-          type: 'string',
-          description: 'Filter to specific account type (e.g., "LIABILITY", "ASSET", "EQUITY", "REVENUE", "EXPENSE")'
-        }
-      },
-      required: []
     }
   }
 ];
