@@ -5,10 +5,19 @@ const rillet = require('./rillet');
 
 // Map tool names to their implementations
 const toolImplementations = {
+  // Google Sheets tools
   'get_budget_data': async (input) => googleSheets.getBudgetData(input),
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
-  'get_actuals': async (input) => rillet.getActuals(input),
-  'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input)
+  'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),
+
+  // Rillet ERP tools
+  'get_arr_waterfall': async (input) => rillet.getARRWaterfall(input),
+  'get_journal_entries': async (input) => rillet.getJournalEntries(input),
+  'get_chart_of_accounts': async () => rillet.getAccounts(),
+  'get_bank_accounts': async (input) => rillet.getBankAccounts(input),
+
+  // Legacy - kept for backward compatibility
+  'get_actuals': async (input) => rillet.getActuals(input)
 };
 
 /**

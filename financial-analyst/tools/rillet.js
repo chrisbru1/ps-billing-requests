@@ -2,7 +2,7 @@
 
 class RilletClient {
   constructor() {
-    this.baseUrl = process.env.RILLET_API_BASE_URL || 'https://api.rillet.com/v1';
+    this.baseUrl = process.env.RILLET_API_BASE_URL || 'https://api.rillet.com';
     this.apiKey = process.env.RILLET_API_KEY;
   }
 
@@ -17,6 +17,8 @@ class RilletClient {
         url.searchParams.append(key, value);
       }
     });
+
+    console.log(`[Rillet] Fetching: ${url.toString()}`);
 
     const response = await fetch(url.toString(), {
       method: 'GET',
@@ -35,138 +37,199 @@ class RilletClient {
     return response.json();
   }
 
-  // Parse period string into start/end dates
-  parsePeriod(period) {
+  // Parse month string to YYYY-MM format for ARR waterfall
+  parseMonth(period) {
     const now = new Date();
     const currentYear = now.getFullYear();
-
-    // Handle various period formats
     const periodLower = period.toLowerCase();
 
-    // Full year: "FY2024", "2024"
-    const yearMatch = periodLower.match(/(?:fy)?(\d{4})/);
-    if (yearMatch && !periodLower.includes('q') && !periodLower.match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/)) {
-      const year = parseInt(yearMatch[1]);
-      return {
-        start_date: `${year}-01-01`,
-        end_date: `${year}-12-31`
-      };
-    }
-
-    // Quarter: "Q4 2024", "Q1 2025"
-    const quarterMatch = periodLower.match(/q([1-4])\s*(\d{4})?/);
-    if (quarterMatch) {
-      const quarter = parseInt(quarterMatch[1]);
-      const year = quarterMatch[2] ? parseInt(quarterMatch[2]) : currentYear;
-      const startMonth = (quarter - 1) * 3 + 1;
-      const endMonth = quarter * 3;
-      return {
-        start_date: `${year}-${String(startMonth).padStart(2, '0')}-01`,
-        end_date: `${year}-${String(endMonth).padStart(2, '0')}-${endMonth === 2 ? '28' : (endMonth === 4 || endMonth === 6 || endMonth === 9 || endMonth === 11 ? '30' : '31')}`
-      };
-    }
-
-    // Month: "January 2024", "Jan 2024", "2024-01"
+    // Month names
     const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     for (let i = 0; i < months.length; i++) {
       if (periodLower.includes(months[i])) {
         const yearMatch = periodLower.match(/(\d{4})/);
         const year = yearMatch ? parseInt(yearMatch[1]) : currentYear;
-        const month = i + 1;
-        const lastDay = new Date(year, month, 0).getDate();
-        return {
-          start_date: `${year}-${String(month).padStart(2, '0')}-01`,
-          end_date: `${year}-${String(month).padStart(2, '0')}-${lastDay}`
-        };
+        return `${year}-${String(i + 1).padStart(2, '0')}`;
       }
     }
 
     // ISO format: "2024-01"
     const isoMatch = period.match(/(\d{4})-(\d{2})/);
     if (isoMatch) {
-      const year = parseInt(isoMatch[1]);
-      const month = parseInt(isoMatch[2]);
-      const lastDay = new Date(year, month, 0).getDate();
-      return {
-        start_date: `${year}-${String(month).padStart(2, '0')}-01`,
-        end_date: `${year}-${String(month).padStart(2, '0')}-${lastDay}`
-      };
+      return `${isoMatch[1]}-${isoMatch[2]}`;
     }
 
-    // Default to current year
-    return {
-      start_date: `${currentYear}-01-01`,
-      end_date: `${currentYear}-12-31`
-    };
+    // Quarter - return last month of quarter
+    const quarterMatch = periodLower.match(/q([1-4])\s*(\d{4})?/);
+    if (quarterMatch) {
+      const quarter = parseInt(quarterMatch[1]);
+      const year = quarterMatch[2] ? parseInt(quarterMatch[2]) : currentYear;
+      const endMonth = quarter * 3;
+      return `${year}-${String(endMonth).padStart(2, '0')}`;
+    }
+
+    // Default to current month
+    return `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }
 
-  async getActuals({ report_type, period, account_category, department }) {
+  async getAccounts() {
     if (!this.apiKey) {
       return {
         error: 'Rillet API not configured. Please set RILLET_API_KEY environment variable.',
-        is_error: true,
-        hint: 'Contact your Rillet administrator to obtain API credentials.'
+        is_error: true
       };
     }
 
     try {
-      const { start_date, end_date } = this.parsePeriod(period);
-
-      // Map report types to Rillet API endpoints
-      // Note: These endpoints are based on typical ERP API patterns.
-      // Actual Rillet endpoints may differ - adjust based on their documentation.
-      const endpointMap = {
-        'income_statement': '/reports/income-statement',
-        'balance_sheet': '/reports/balance-sheet',
-        'cash_flow': '/reports/cash-flow',
-        'gl_transactions': '/general-ledger/transactions',
-        'ar_aging': '/reports/accounts-receivable-aging',
-        'ap_aging': '/reports/accounts-payable-aging',
-        'trial_balance': '/reports/trial-balance'
-      };
-
-      const endpoint = endpointMap[report_type];
-      if (!endpoint) {
-        return {
-          error: `Unknown report type: ${report_type}`,
-          is_error: true,
-          available_report_types: Object.keys(endpointMap)
-        };
-      }
-
-      const params = {
-        start_date,
-        end_date
-      };
-
-      if (account_category) {
-        params.account_category = account_category;
-      }
-
-      if (department) {
-        params.department = department;
-        // Some APIs use cost_center instead
-        params.cost_center = department;
-      }
-
-      const data = await this.request(endpoint, params);
-
+      const data = await this.request('/accounts');
       return {
         source: 'Rillet ERP',
-        report_type,
-        period: { start_date, end_date, original: period },
-        filters: { account_category, department },
+        data_type: 'chart_of_accounts',
         results: data,
         fetched_at: new Date().toISOString()
       };
-
     } catch (error) {
       return {
-        error: `Failed to fetch actuals from Rillet: ${error.message}`,
-        is_error: true,
-        report_type,
-        period
+        error: `Failed to fetch accounts from Rillet: ${error.message}`,
+        is_error: true
       };
+    }
+  }
+
+  async getJournalEntries({ start_date, end_date, subsidiary }) {
+    if (!this.apiKey) {
+      return {
+        error: 'Rillet API not configured. Please set RILLET_API_KEY environment variable.',
+        is_error: true
+      };
+    }
+
+    try {
+      const params = {};
+      if (start_date) params.created_at_min = start_date;
+      if (end_date) params.created_at_max = end_date;
+      if (subsidiary) params.subsidiary = subsidiary;
+
+      const data = await this.request('/journal-entries', params);
+      return {
+        source: 'Rillet ERP',
+        data_type: 'journal_entries',
+        filters: { start_date, end_date, subsidiary },
+        results: data,
+        fetched_at: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        error: `Failed to fetch journal entries from Rillet: ${error.message}`,
+        is_error: true
+      };
+    }
+  }
+
+  async getARRWaterfall({ month, status, breakdown, subsidiary }) {
+    if (!this.apiKey) {
+      return {
+        error: 'Rillet API not configured. Please set RILLET_API_KEY environment variable.',
+        is_error: true
+      };
+    }
+
+    try {
+      const params = {};
+      if (month) params.month = this.parseMonth(month);
+      if (status) params.status = status;
+      if (breakdown) params.breakdown = breakdown;
+      if (subsidiary) params.subsidiary = subsidiary;
+
+      const data = await this.request('/reports/arr-waterfall', params);
+      return {
+        source: 'Rillet ERP',
+        data_type: 'arr_waterfall',
+        month: params.month,
+        filters: { status, breakdown, subsidiary },
+        results: data,
+        fetched_at: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        error: `Failed to fetch ARR waterfall from Rillet: ${error.message}`,
+        is_error: true
+      };
+    }
+  }
+
+  async getBankAccounts({ subsidiary }) {
+    if (!this.apiKey) {
+      return {
+        error: 'Rillet API not configured. Please set RILLET_API_KEY environment variable.',
+        is_error: true
+      };
+    }
+
+    try {
+      const params = {};
+      if (subsidiary) params.subsidiary = subsidiary;
+
+      const data = await this.request('/bank-accounts', params);
+      return {
+        source: 'Rillet ERP',
+        data_type: 'bank_accounts',
+        results: data,
+        fetched_at: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        error: `Failed to fetch bank accounts from Rillet: ${error.message}`,
+        is_error: true
+      };
+    }
+  }
+
+  async getLastClosedPeriod() {
+    if (!this.apiKey) {
+      return {
+        error: 'Rillet API not configured. Please set RILLET_API_KEY environment variable.',
+        is_error: true
+      };
+    }
+
+    try {
+      const data = await this.request('/books/periods/last-closed');
+      return {
+        source: 'Rillet ERP',
+        data_type: 'last_closed_period',
+        results: data,
+        fetched_at: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        error: `Failed to fetch last closed period from Rillet: ${error.message}`,
+        is_error: true
+      };
+    }
+  }
+
+  // Legacy method for backward compatibility - routes to appropriate new method
+  async getActuals({ report_type, period, account_category, department }) {
+    // Map old report types to new methods
+    switch (report_type) {
+      case 'arr_waterfall':
+        return this.getARRWaterfall({ month: period });
+      case 'journal_entries':
+      case 'gl_transactions':
+        return this.getJournalEntries({});
+      case 'accounts':
+      case 'chart_of_accounts':
+        return this.getAccounts();
+      case 'bank_accounts':
+        return this.getBankAccounts({});
+      default:
+        return {
+          error: `Report type '${report_type}' is not directly available in Rillet API.`,
+          is_error: true,
+          hint: 'Available Rillet data: arr_waterfall, journal_entries, accounts, bank_accounts. For income statement/balance sheet, data would need to be derived from journal entries.',
+          available_types: ['arr_waterfall', 'journal_entries', 'accounts', 'bank_accounts']
+        };
     }
   }
 }

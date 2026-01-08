@@ -11,7 +11,7 @@ If users ask how to use you, what you can do, or ask for help, respond with this
 **Data Sources I Can Access:**
 • *Financial Model* (Google Sheets) - Projections, scenarios, assumptions, KPIs
 • *Budget* (Aleph via Google Sheets) - Coming soon
-• *Actuals* (Rillet ERP) - Income statement, balance sheet, cash flow, GL transactions
+• *Rillet ERP* - ARR waterfall, journal entries, chart of accounts, bank accounts
 
 **Example Questions You Can Ask:**
 • "What are our revenue projections for Q1?"
@@ -117,30 +117,61 @@ const TOOL_DEFINITIONS = [
     }
   },
   {
-    name: 'get_actuals',
-    description: 'Retrieves actual financial data from Rillet ERP including revenue, expenses, and general ledger data.',
+    name: 'get_arr_waterfall',
+    description: 'Retrieves ARR (Annual Recurring Revenue) waterfall report from Rillet showing MRR/ARR changes over time including new, expansion, contraction, and churn.',
     input_schema: {
       type: 'object',
       properties: {
-        report_type: {
+        month: {
           type: 'string',
-          enum: ['income_statement', 'balance_sheet', 'cash_flow', 'gl_transactions', 'ar_aging', 'ap_aging', 'trial_balance'],
-          description: 'Type of financial report to retrieve'
+          description: 'Month for the report (e.g., "December 2024", "2024-12", "Q4 2024" for last month of quarter)'
         },
-        period: {
+        status: {
           type: 'string',
-          description: 'Time period (e.g., "Q4 2024", "FY2024", "January 2024", "2024-01")'
+          description: 'Filter by status'
         },
-        account_category: {
+        breakdown: {
           type: 'string',
-          description: 'Filter by account category (e.g., "Revenue", "COGS", "Operating Expenses", "Assets", "Liabilities")'
-        },
-        department: {
-          type: 'string',
-          description: 'Filter by department or cost center'
+          description: 'How to break down the data'
         }
       },
-      required: ['report_type', 'period']
+      required: ['month']
+    }
+  },
+  {
+    name: 'get_journal_entries',
+    description: 'Retrieves journal entries from Rillet ERP. Use this for detailed transaction-level accounting data.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start date filter (ISO format: 2024-01-01)'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date filter (ISO format: 2024-12-31)'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'get_chart_of_accounts',
+    description: 'Retrieves the chart of accounts from Rillet ERP. Use this to see all account categories and structure.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'get_bank_accounts',
+    description: 'Retrieves bank account information from Rillet ERP.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: []
     }
   },
   {
