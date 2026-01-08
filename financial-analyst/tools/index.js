@@ -27,6 +27,10 @@ const toolImplementations = {
   'get_chart_of_accounts': async () => rillet.getAccounts(),
   'get_bank_accounts': async (input) => rillet.getBankAccounts(input),
 
+  // Calculated balance tools (from journal entries)
+  'calculate_account_balance': async (input) => rillet.calculateAccountBalance(input),
+  'calculate_trial_balance': async (input) => rillet.calculateTrialBalance(input),
+
   // Legacy - kept for backward compatibility
   'get_actuals': async (input) => rillet.getActuals(input)
 };

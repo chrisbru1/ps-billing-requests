@@ -215,6 +215,46 @@ const TOOL_DEFINITIONS = [
       },
       required: ['sheet_type']
     }
+  },
+  {
+    name: 'calculate_account_balance',
+    description: 'Calculates the balance for a specific account by summing all debits and credits from journal entries. Use this to find current balances for liability accounts (like SLW), asset accounts, or any GL account. This is the PRIMARY tool for getting account balances since Rillet does not have a direct balance endpoint.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        account_code: {
+          type: 'string',
+          description: 'The account code to look up (e.g., "24000", "10100")'
+        },
+        account_name: {
+          type: 'string',
+          description: 'Search by account name instead of code (e.g., "SLW", "Cash", "Accounts Payable")'
+        },
+        as_of_date: {
+          type: 'string',
+          description: 'Calculate balance as of this date (ISO format: 2024-12-31). If not provided, calculates all-time balance.'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'calculate_trial_balance',
+    description: 'Generates a trial balance by calculating balances for all accounts from journal entries. Use this to see all account balances at once, verify debits equal credits, or get an overview of the general ledger. Can filter by account type.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        as_of_date: {
+          type: 'string',
+          description: 'Calculate trial balance as of this date (ISO format: 2024-12-31)'
+        },
+        account_type: {
+          type: 'string',
+          description: 'Filter to specific account type (e.g., "LIABILITY", "ASSET", "EQUITY", "REVENUE", "EXPENSE")'
+        }
+      },
+      required: []
+    }
   }
 ];
 
