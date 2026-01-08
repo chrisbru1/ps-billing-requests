@@ -28,8 +28,10 @@ const GITHUB_REPO = 'psbillingapp';
 // Slack channel for non-Slack-created PR notifications
 const PR_NOTIFICATION_CHANNEL = process.env.PR_NOTIFICATION_CHANNEL || 'ps-billing-app-testing';
 
-// FPA channel for financial analyst bot (access-controlled)
-const FPA_CHANNEL_ID = process.env.FPA_CHANNEL_ID;
+// FPA channels for financial analyst bot (access-controlled, comma-separated)
+const FPA_CHANNEL_IDS = process.env.FPA_CHANNEL_ID
+  ? process.env.FPA_CHANNEL_ID.split(',').map(id => id.trim())
+  : [];
 
 // Verify GitHub webhook signature
 function verifyGitHubSignature(payload, signature) {
@@ -754,8 +756,8 @@ app.command('/fpabot', async ({ command, ack, client, logger }) => {
   // Acknowledge immediately (Slack requires response within 3 seconds)
   await ack();
 
-  // SECURITY: Only respond in the designated FPA channel
-  if (!FPA_CHANNEL_ID) {
+  // SECURITY: Only respond in designated FPA channels
+  if (FPA_CHANNEL_IDS.length === 0) {
     logger.warn('FPA_CHANNEL_ID not configured');
     await client.chat.postEphemeral({
       channel: command.channel_id,
@@ -765,11 +767,11 @@ app.command('/fpabot', async ({ command, ack, client, logger }) => {
     return;
   }
 
-  if (command.channel_id !== FPA_CHANNEL_ID) {
+  if (!FPA_CHANNEL_IDS.includes(command.channel_id)) {
     await client.chat.postEphemeral({
       channel: command.channel_id,
       user: command.user_id,
-      text: ':lock: This command is only available in the #fpa channel.'
+      text: ':lock: This command is only available in authorized FPA channels.'
     });
     return;
   }
