@@ -2,6 +2,7 @@
 
 const googleSheets = require('./google-sheets');
 const rillet = require('./rillet');
+const { getRilletMCPClient } = require('./rillet-mcp');
 
 // Map tool names to their implementations
 const toolImplementations = {
@@ -10,7 +11,17 @@ const toolImplementations = {
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
   'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),
 
-  // Rillet ERP tools
+  // Rillet MCP tools - dynamic discovery and calling
+  'list_rillet_tools': async () => {
+    const mcpClient = getRilletMCPClient();
+    return mcpClient.listTools();
+  },
+  'call_rillet_tool': async (input) => {
+    const mcpClient = getRilletMCPClient();
+    return mcpClient.callTool(input.tool_name, input.arguments || {});
+  },
+
+  // Rillet REST API tools (fallback)
   'get_arr_waterfall': async (input) => rillet.getARRWaterfall(input),
   'get_journal_entries': async (input) => rillet.getJournalEntries(input),
   'get_chart_of_accounts': async () => rillet.getAccounts(),

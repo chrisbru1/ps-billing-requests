@@ -175,6 +175,33 @@ const TOOL_DEFINITIONS = [
     }
   },
   {
+    name: 'list_rillet_tools',
+    description: 'Discovers all available tools from Rillet MCP server. Use this FIRST to see what financial data and reports are available from Rillet before calling specific tools. This will show you tools for balance sheets, income statements, account balances, and more.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'call_rillet_tool',
+    description: 'Calls a specific Rillet MCP tool by name. Use list_rillet_tools first to discover available tools and their parameters. This allows access to financial reports, account balances, and other data from Rillet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tool_name: {
+          type: 'string',
+          description: 'The name of the Rillet MCP tool to call (from list_rillet_tools)'
+        },
+        arguments: {
+          type: 'object',
+          description: 'Arguments to pass to the tool (based on the tool\'s input schema from list_rillet_tools)'
+        }
+      },
+      required: ['tool_name']
+    }
+  },
+  {
     name: 'list_available_sheets',
     description: 'Lists all available Google Sheets and their tabs. Use this to discover what budget and model data is available.',
     input_schema: {

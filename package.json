@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@octokit/rest": "^21.0.0",
     "@slack/bolt": "^3.17.0",
     "dotenv": "^16.3.1",
