@@ -24,3 +24,8 @@ Thumbs.db
 # Build output
 dist/
 build/
+
+# Google Service Account credentials (sensitive)
+*-*.json
+!package.json
+!package-lock.json

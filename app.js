@@ -5,6 +5,9 @@ const { Octokit } = require('@octokit/rest');
 const http = require('http');
 const crypto = require('crypto');
 
+// Financial Analyst module
+const financialAnalyst = require('./financial-analyst');
+
 // Initialize Slack Bolt app with Socket Mode
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -24,6 +27,9 @@ const GITHUB_REPO = 'psbillingapp';
 
 // Slack channel for non-Slack-created PR notifications
 const PR_NOTIFICATION_CHANNEL = process.env.PR_NOTIFICATION_CHANNEL || 'ps-billing-app-testing';
+
+// FPA channel for financial analyst bot (access-controlled)
+const FPA_CHANNEL_ID = process.env.FPA_CHANNEL_ID;
 
 // Verify GitHub webhook signature
 function verifyGitHubSignature(payload, signature) {
@@ -739,6 +745,87 @@ app.view('billing_request_modal', async ({ ack, body, view, client, logger }) =>
       errors: {
         title_block: 'Failed to create GitHub issue. Please try again or contact support.',
       },
+    });
+  }
+});
+
+// Handle @mentions for FPA Financial Analyst Bot
+app.event('app_mention', async ({ event, client, logger }) => {
+  // SECURITY: Only respond in the designated FPA channel
+  if (!FPA_CHANNEL_ID) {
+    logger.warn('FPA_CHANNEL_ID not configured - ignoring app_mention');
+    return;
+  }
+
+  if (event.channel !== FPA_CHANNEL_ID) {
+    logger.info(`Ignoring app_mention in non-FPA channel: ${event.channel}`);
+    return;
+  }
+
+  // Extract the question (remove the bot mention)
+  const question = event.text.replace(/<@[A-Z0-9]+>/gi, '').trim();
+
+  if (!question) {
+    await client.chat.postMessage({
+      channel: event.channel,
+      thread_ts: event.ts,
+      text: 'Hi! I\'m the FP&A Financial Analyst. Ask me questions about our budget, financial model, or actuals.\n\nFor example:\n• "What\'s our Q4 revenue vs budget?"\n• "Show me operating expenses by department"\n• "What are the key assumptions in our model?"'
+    });
+    return;
+  }
+
+  try {
+    // Post "thinking" indicator
+    const thinkingMsg = await client.chat.postMessage({
+      channel: event.channel,
+      thread_ts: event.ts,
+      text: ':hourglass_flowing_sand: Analyzing your question...',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':hourglass_flowing_sand: *Analyzing your question...*\n\nQuerying financial data sources. This may take a moment.'
+          }
+        }
+      ]
+    });
+
+    logger.info(`[FPA Bot] Processing question from ${event.user}: ${question.substring(0, 100)}...`);
+
+    // Process with financial analyst
+    const response = await financialAnalyst.analyze(question, {
+      userId: event.user,
+      threadTs: event.ts
+    });
+
+    // Update the "thinking" message with the actual response
+    await client.chat.update({
+      channel: event.channel,
+      ts: thinkingMsg.ts,
+      text: response.text,
+      blocks: response.blocks
+    });
+
+    logger.info(`[FPA Bot] Successfully responded to ${event.user}`);
+
+  } catch (error) {
+    logger.error('[FPA Bot] Error processing question:', error);
+
+    // Post error message in thread
+    await client.chat.postMessage({
+      channel: event.channel,
+      thread_ts: event.ts,
+      text: ':x: Sorry, I encountered an error analyzing your question. Please try again or contact the FP&A team.',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: ':warning: *Unable to process your question*\n\nI encountered an unexpected error. Please try:\n• Rephrasing your question\n• Asking a simpler question\n• Trying again in a few moments'
+          }
+        }
+      ]
     });
   }
 });
