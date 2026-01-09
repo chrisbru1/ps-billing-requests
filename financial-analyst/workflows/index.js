@@ -90,6 +90,17 @@ const SEARCH_TO_SUBTYPE_MAP = {
 };
 
 /**
+ * Exclusion patterns for certain search terms
+ * When searching for these terms, exclude accounts matching these patterns
+ */
+const SEARCH_EXCLUSIONS = {
+  'cash': ['receivable', 'receivables'],
+  'liquid': ['receivable', 'receivables'],
+  'liquidity': ['receivable', 'receivables'],
+  'bank': ['receivable', 'receivables'],
+};
+
+/**
  * Find accounts matching a query
  * @param {object} criteria - Search criteria
  * @param {string} criteria.search - Text to search in name (case-insensitive)
@@ -101,6 +112,8 @@ async function findAccounts(criteria = {}) {
   const accounts = await getAllAccounts();
   let { search, type, subtype, codes } = criteria;
   let subtypes = null; // Can be array for multi-subtype matching
+  let exclusions = null; // Account name patterns to exclude
+  const originalSearch = search; // Keep track of original search for exclusions
 
   // Smart mapping: if search term maps to known subtype(s), use subtype matching instead
   if (search && !subtype) {
@@ -109,6 +122,13 @@ async function findAccounts(criteria = {}) {
     if (mapped) {
       subtypes = Array.isArray(mapped) ? mapped : [mapped];
       console.log(`[Workflow] Mapping search "${search}" to subtypes: ${subtypes.join(', ')}`);
+
+      // Check for exclusions for this search term
+      exclusions = SEARCH_EXCLUSIONS[searchLower];
+      if (exclusions) {
+        console.log(`[Workflow] Excluding accounts with names containing: ${exclusions.join(', ')}`);
+      }
+
       search = null; // Clear search since we're using subtype
     }
   }
@@ -134,6 +154,16 @@ async function findAccounts(criteria = {}) {
       const accSubtype = (acc.subtype || '').toLowerCase();
       const matches = subtypes.some(st => st.toLowerCase() === accSubtype);
       if (!matches) return false;
+    }
+
+    // Apply exclusions (e.g., exclude "receivables" from cash queries)
+    if (exclusions && exclusions.length > 0) {
+      const nameLower = (acc.name || '').toLowerCase();
+      for (const exclusion of exclusions) {
+        if (nameLower.includes(exclusion.toLowerCase())) {
+          return false; // Exclude this account
+        }
+      }
     }
 
     // Filter by name search (only if not already matched by subtype)
