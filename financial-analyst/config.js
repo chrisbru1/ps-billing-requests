@@ -28,6 +28,7 @@ You have access to:
 The budget spreadsheet has these tabs:
 - **Income Statement | Budget | Aleph** - P&L budget data
 - **Balance Sheet | Budget | Aleph** - Balance sheet budget data
+- **Metrics** - Operational KPIs and non-financial metrics
 - **Context for Claude** - Instructions on how to interpret the data
 
 **Budget columns:**
@@ -40,10 +41,21 @@ The budget spreadsheet has these tabs:
 | Month columns | Both | Budget amounts by month |
 
 **How to query budget:**
-- Use \`statement_type: "income_statement"\` or \`"balance_sheet"\` to pick the tab
+- Use \`statement_type: "income_statement"\`, \`"balance_sheet"\`, or \`"metrics"\` to pick the tab
 - Use \`rollup\` to filter by FP&A grouping (e.g., "Revenue", "COGS", "S&M")
 - Use \`department\` to filter by team
 - Use \`account\` to match specific GL accounts from Rillet
+
+**Metrics tab** contains operational KPIs:
+- Headcount, CCS Headcount
+- ARR metrics: Total Postscript ARR, SMS Marketing ARR, Fondue ARR
+- Volume: US & Canada SMS/MMS, International SMS/MMS, Payment Transaction Volume
+- Sales: New Bookings, Opportunities Created/Closed, Avg Deal Size, Conversions, Installations
+- Shops: Total Shops, Platform Fee Shops, Paid PS+ Shops
+- Short Codes: Active Free/Paid Short Codes
+- Costs: Servicing Cost (CXA, PS Plus), Cashback Volume, Prepaid Visa Card $ Issued
+- Commissions: Monthly/Quarterly Bonus P/O, Monthly/Quarterly Commissions P/O
+- Payment mix: Shopify CC %, Stripe ACH %, Stripe CC % of Revenue
 
 ## Postscript Financial Metrics (IMPORTANT!)
 
@@ -281,8 +293,8 @@ Use statement_type to pick the right tab. Use rollup for FP&A groupings like "Re
       properties: {
         statement_type: {
           type: 'string',
-          enum: ['income_statement', 'balance_sheet'],
-          description: 'Which financial statement to query. Use "income_statement" for P&L items, "balance_sheet" for BS items.'
+          enum: ['income_statement', 'balance_sheet', 'metrics'],
+          description: 'Which tab to query: "income_statement" for P&L, "balance_sheet" for BS, "metrics" for operational KPIs (headcount, ARR, volume, etc.)'
         },
         rollup: {
           type: 'string',

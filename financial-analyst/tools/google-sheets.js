@@ -84,7 +84,10 @@ class GoogleSheetsClient {
           'pnl': 'Income Statement | Budget | Aleph',
           'balance_sheet': 'Balance Sheet | Budget | Aleph',
           'balance': 'Balance Sheet | Budget | Aleph',
-          'bs': 'Balance Sheet | Budget | Aleph'
+          'bs': 'Balance Sheet | Budget | Aleph',
+          'metrics': 'Metrics',
+          'kpis': 'Metrics',
+          'operational': 'Metrics'
         };
         targetSheet = sheetMap[statement_type.toLowerCase()];
       }
