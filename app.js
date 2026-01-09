@@ -879,7 +879,10 @@ app.message(async ({ message, client, logger }) => {
   if (message.bot_id || message.subtype === 'bot_message') return;
 
   // Only respond in FPA channels
-  if (!FPA_CHANNEL_IDS.includes(message.channel)) return;
+  if (!FPA_CHANNEL_IDS.includes(message.channel)) {
+    logger.info(`[FPA Bot] Thread reply in non-FPA channel: ${message.channel}, FPA channels: ${FPA_CHANNEL_IDS.join(',')}`);
+    return;
+  }
 
   // Check if the thread was started by the bot (our messages have the question context)
   // We look for threads where we've previously responded
@@ -892,7 +895,10 @@ app.message(async ({ message, client, logger }) => {
     });
 
     const parentMessage = result.messages?.[0];
-    if (!parentMessage) return;
+    if (!parentMessage) {
+      logger.info(`[FPA Bot] Thread reply but no parent message found`);
+      return;
+    }
 
     // Check if parent message has our FPA Bot signature (context block with "asked:")
     const hasContext = parentMessage.blocks?.some(block =>
@@ -900,7 +906,11 @@ app.message(async ({ message, client, logger }) => {
       block.elements?.some(el => el.text?.includes('asked:'))
     );
 
-    if (!hasContext) return;
+    if (!hasContext) {
+      logger.info(`[FPA Bot] Thread reply but parent message doesn't have FPA Bot signature`);
+      logger.info(`[FPA Bot] Parent blocks: ${JSON.stringify(parentMessage.blocks?.slice(0, 2))}`);
+      return;
+    }
 
     const question = message.text?.trim();
     if (!question) return;
