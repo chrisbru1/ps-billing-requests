@@ -393,7 +393,10 @@ async function accountBalance(input = {}) {
       };
     }
 
-    console.log(`[Workflow:accountBalance] Found ${matchedAccounts.length} accounts: ${matchedAccounts.map(a => a.code).join(', ')}`);
+    console.log(`[Workflow:accountBalance] Found ${matchedAccounts.length} accounts:`);
+    matchedAccounts.forEach(a => {
+      console.log(`  - ${a.code}: ${a.name} (type=${a.type}, subtype=${a.subtype})`);
+    });
 
     // Step 2: Calculate balances for matched accounts
     const accountCodes = matchedAccounts.map(a => a.code);

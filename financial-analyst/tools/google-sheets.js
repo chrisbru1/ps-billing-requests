@@ -260,13 +260,14 @@ class GoogleSheetsClient {
 
       // Filter by parameters
       const filtered = data.filter(row => {
-        // Filter by metric name - search in Metric column AND Rollup column
+        // Filter by metric/rollup - prefer exact matching for rollup column
         if (metric) {
-          const metricLower = metric.toLowerCase();
-          const rowMetric = (metricCol >= 0 ? row[headers[metricCol]] : row[headers[0]])?.toString().toLowerCase() || '';
-          const rowRollup = rollupCol >= 0 ? (row[headers[rollupCol]]?.toString().toLowerCase() || '') : '';
-          // Match if metric OR rollup contains the search term
-          if (!rowMetric.includes(metricLower) && !rowRollup.includes(metricLower)) return false;
+          const metricLower = metric.toLowerCase().trim();
+          const rowRollup = rollupCol >= 0 ? (row[headers[rollupCol]]?.toString().toLowerCase().trim() || '') : '';
+
+          // EXACT match only - the rollup value must exactly match the search term
+          // This prevents "Indirect Labor" from matching "Labor" or "Direct Labor"
+          if (rowRollup !== metricLower) return false;
         }
 
         // Get date value for month/quarter/year filtering
@@ -330,6 +331,28 @@ class GoogleSheetsClient {
       });
 
       console.log(`[Sheets] Filtered to ${filtered.length} rows`);
+
+      // Debug: show unique rollup values matched
+      if (rollupCol >= 0 && filtered.length > 0) {
+        const uniqueRollups = [...new Set(filtered.map(r => r[headers[rollupCol]]).filter(Boolean))];
+        console.log(`[Sheets] Unique rollup values in results: ${uniqueRollups.join(', ')}`);
+      }
+
+      // Debug: check for potential duplicates (same dept + month)
+      if (filtered.length > 0 && deptCol >= 0 && monthCol >= 0) {
+        const seen = new Set();
+        let dupeCount = 0;
+        for (const row of filtered) {
+          const key = `${row[headers[deptCol]]}_${row[headers[monthCol]]}`;
+          if (seen.has(key)) {
+            dupeCount++;
+          }
+          seen.add(key);
+        }
+        if (dupeCount > 0) {
+          console.log(`[Sheets] WARNING: ${dupeCount} potential duplicate rows (same dept+month)`);
+        }
+      }
 
       // If no results found, return helpful debug info
       if (filtered.length === 0) {
