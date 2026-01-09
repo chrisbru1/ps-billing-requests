@@ -73,30 +73,41 @@ class GoogleSheetsClient {
     }
 
     try {
-      // Map statement_type to actual tab names in the budget sheet
+      // First, get available tabs
+      const tabsResponse = await this.sheets.spreadsheets.get({
+        spreadsheetId: sheetId,
+        fields: 'sheets.properties.title'
+      });
+      const availableTabs = tabsResponse.data.sheets.map(s => s.properties.title);
+      console.log(`[Sheets] Available tabs: ${availableTabs.join(', ')}`);
+
+      // Find the right tab
       let targetSheet = sheet_name;
+
       if (!targetSheet && statement_type) {
-        const sheetMap = {
-          'income_statement': 'Income Statement',
-          'income': 'Income Statement',
-          'is': 'Income Statement',
-          'pl': 'Income Statement',
-          'pnl': 'Income Statement',
-          'balance_sheet': 'Balance Sheet',
-          'balance': 'Balance Sheet',
-          'bs': 'Balance Sheet',
-          'metrics': 'Metrics',
-          'kpis': 'Metrics',
-          'operational': 'Metrics'
-        };
-        targetSheet = sheetMap[statement_type.toLowerCase()];
+        const stLower = statement_type.toLowerCase();
+        // Try to find a matching tab
+        targetSheet = availableTabs.find(tab => {
+          const tabLower = tab.toLowerCase();
+          if (stLower === 'income_statement' || stLower === 'income' || stLower === 'is' || stLower === 'pl' || stLower === 'pnl') {
+            return tabLower.includes('income') || tabLower.includes('p&l') || tabLower.includes('pnl');
+          }
+          if (stLower === 'balance_sheet' || stLower === 'balance' || stLower === 'bs') {
+            return tabLower.includes('balance');
+          }
+          if (stLower === 'metrics' || stLower === 'kpis' || stLower === 'operational') {
+            return tabLower.includes('metric') || tabLower.includes('kpi');
+          }
+          return false;
+        });
       }
 
-      // Default to Income Statement if no sheet specified
+      // Default: use first tab that looks like income statement, or just the first tab
       if (!targetSheet) {
-        targetSheet = 'Income Statement';
+        targetSheet = availableTabs.find(t => t.toLowerCase().includes('income')) || availableTabs[0];
       }
 
+      console.log(`[Sheets] Using tab: ${targetSheet}`);
       const range = `'${targetSheet}'!A:Z`;
 
       const response = await this.sheets.spreadsheets.values.get({
@@ -194,19 +205,20 @@ class GoogleSheetsClient {
 
       // If no results found, return helpful debug info
       if (filtered.length === 0) {
-        const sampleMetrics = [...new Set(data.slice(0, 50).map(row =>
+        const sampleMetrics = [...new Set(data.slice(0, 100).map(row =>
           metricCol >= 0 ? row[headers[metricCol]] : row[headers[0]]
         ).filter(Boolean))];
 
         return {
           source: 'Google Sheets - Budget',
           sheet_name: targetSheet,
+          available_tabs: availableTabs,
           error: 'No matching rows found',
           query: { metric, month, quarter, year, department, account, vendor, rollup, statement_type },
           total_rows_in_sheet: data.length,
           headers: headers,
-          available_metrics: sampleMetrics.slice(0, 20),
-          hint: 'Try a different metric name from the available_metrics list'
+          available_metrics: sampleMetrics.slice(0, 30),
+          hint: 'Try a different metric name from the available_metrics list, or check a different tab'
         };
       }
 
@@ -222,6 +234,7 @@ class GoogleSheetsClient {
       return {
         source: 'Google Sheets - Budget',
         sheet_name: targetSheet,
+        available_tabs: availableTabs,
         query: { metric, month, quarter, year, department, account, vendor, rollup, statement_type },
         results: filtered.slice(0, 200),
         row_count: filtered.length,
@@ -233,10 +246,13 @@ class GoogleSheetsClient {
 
     } catch (error) {
       console.error(`[Sheets] Error: ${error.message}`);
+      console.error(`[Sheets] Stack: ${error.stack}`);
+
       return {
         error: `Failed to fetch budget data: ${error.message}`,
         is_error: true,
-        query: { metric, month, quarter, year, department, sheet_name, statement_type }
+        query: { metric, month, quarter, year, department, sheet_name, statement_type },
+        hint: 'Check Heroku logs for details. The Google Sheets API may have returned an error.'
       };
     }
   }
