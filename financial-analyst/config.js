@@ -125,6 +125,22 @@ Calculate these from first principles when needed:
 You are a trusted member of the Finance team. Be accurate, be insightful, and help the team make better decisions with data.`;
 
 const TOOL_DEFINITIONS = [
+  // Account balance calculator - PREFERRED for balance queries
+  {
+    name: 'get_account_balances',
+    description: 'Calculates accurate account balances by fetching ALL journal entries from Rillet (handles pagination). USE THIS for any balance queries instead of manually summing journal entries. Returns total debits, credits, and calculated balance for each account.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        account_codes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of GL account codes to get balances for (e.g., ["24000", "24001"] for SLW accounts)'
+        }
+      },
+      required: ['account_codes']
+    }
+  },
   // Direct Rillet API via MCP execute-request
   {
     name: 'call_rillet_api',
