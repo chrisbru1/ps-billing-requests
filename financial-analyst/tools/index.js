@@ -2,6 +2,7 @@
 
 const googleSheets = require('./google-sheets');
 const { getRilletMCPClient } = require('./rillet-mcp');
+const workflows = require('../workflows');
 
 // Rillet API base URL
 const RILLET_API_BASE = process.env.RILLET_API_BASE_URL || 'https://api.rillet.com';
@@ -129,18 +130,23 @@ function formatCurrency(amount) {
 
 // Map tool names to their implementations
 const toolImplementations = {
+  // WORKFLOW TOOLS (preferred - these are smarter and handle orchestration)
+  'account_balance': async (input) => workflows.accountBalance(input),
+  'list_account_categories': async () => workflows.listAccountCategories(),
+
   // Google Sheets tools
   'get_budget_data': async (input) => googleSheets.getBudgetData(input),
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
   'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),
 
-  // Account balance calculator - handles pagination properly
+  // Legacy: Account balance calculator (kept for backward compatibility)
   'get_account_balances': async (input) => {
     const { account_codes } = input;
     if (!account_codes || !Array.isArray(account_codes) || account_codes.length === 0) {
       return { error: 'account_codes array is required', is_error: true };
     }
-    return calculateAccountBalances(account_codes);
+    // Use the new workflow with codes
+    return workflows.accountBalance({ codes: account_codes });
   },
 
   // Direct Rillet API via MCP execute-request

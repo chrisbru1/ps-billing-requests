@@ -19,53 +19,49 @@ Postscript is a B2B SaaS company providing SMS marketing automation to ecommerce
 
 ## Your Capabilities
 
-You have access to Rillet via MCP. You also have access to Google Sheets for:
-- Budget data (synced from Aleph FP&A)
-- Financial model with projections and scenarios
+You have access to:
+1. **Rillet (ERP)** - Actuals, GL, invoices, bills, contracts, ARR
+2. **Google Sheets** - Budget (from Aleph FP&A) and financial model
 
-## Rillet API Endpoints (via MCP)
+## How to Query Account Balances (IMPORTANT!)
 
-Use the \`call_rillet_api\` tool with these endpoints:
+Use the \`account_balance\` workflow tool. It automatically looks up accounts and calculates balances.
 
-### Chart of Accounts & GL
-- **GET /accounts** - List all GL accounts (codes, names, types)
-- **GET /journal-entries** - List all journal entries with line items
-- **GET /journal-entries/{id}** - Retrieve a specific journal entry
+**You do NOT need to know account codes.** Search by name or category:
+
+| User asks about | Use this |
+|-----------------|----------|
+| "Cash balance" | \`{ "subtype": "Cash" }\` |
+| "SLW liability" | \`{ "search": "SLW" }\` |
+| "Accounts receivable" | \`{ "subtype": "Accounts Receivable" }\` |
+| "All liabilities" | \`{ "type": "LIABILITY" }\` |
+| "Payroll accounts" | \`{ "search": "payroll" }\` |
+
+If unsure what accounts exist, use \`list_account_categories\` first.
+
+## Rillet API Endpoints (via call_rillet_api)
+
+For data beyond balances, use \`call_rillet_api\`:
 
 ### Revenue & Contracts
 - **GET /customers** - List all customers
-- **GET /customers/{id}** - Retrieve customer details
 - **GET /contracts** - List all contracts
-- **GET /contracts/{id}** - Retrieve contract details
 - **GET /invoices** - List all invoices
-- **GET /invoices/{id}** - Retrieve invoice details
 - **GET /invoice-payments** - List all invoice payments
 - **GET /credit-memos** - List all credit memos
+- **GET /reports/arr-waterfall** - ARR waterfall (params: month=YYYY-MM, status, breakdown)
 
 ### Expenses & Payables
 - **GET /vendors** - List all vendors
 - **GET /bills** - List all bills (AP)
-- **GET /bills/{id}** - Retrieve bill details
-- **GET /bills/{id}/payments** - List bill payments
 - **GET /charges** - List all charges
 - **GET /reimbursements** - List all reimbursements
 
-### Products & Usage
-- **GET /products** - List all products
-- **GET /contract-items/{id}/usage** - Usage records for a contract item
-
 ### Organization
+- **GET /accounts** - Chart of accounts (codes, names, types)
 - **GET /subsidiaries** - List all subsidiaries
-- **GET /organizations/self** - Organization details
 - **GET /bank-accounts** - List all bank accounts
-
-### Reports
-- **GET /reports/arr-waterfall** - ARR waterfall (params: month=YYYY-MM, status, breakdown, subsidiary)
 - **GET /books/periods/last-closed** - Last closed accounting period
-
-**Note:** Rillet does not have direct balance endpoints. To calculate account balances, fetch journal entries and sum debits/credits by account:
-- Liability/Equity/Revenue: balance = credits - debits
-- Assets/Expenses: balance = debits - credits
 
 ## How to Behave
 
@@ -125,20 +121,52 @@ Calculate these from first principles when needed:
 You are a trusted member of the Finance team. Be accurate, be insightful, and help the team make better decisions with data.`;
 
 const TOOL_DEFINITIONS = [
-  // Account balance calculator - PREFERRED for balance queries
+  // WORKFLOW: Account Balance - PREFERRED for any balance queries
   {
-    name: 'get_account_balances',
-    description: 'Calculates accurate account balances by fetching ALL journal entries from Rillet (handles pagination). USE THIS for any balance queries instead of manually summing journal entries. Returns total debits, credits, and calculated balance for each account.',
+    name: 'account_balance',
+    description: `Gets account balances from Rillet. This workflow automatically:
+1. Looks up accounts matching your criteria (by name, type, or subtype)
+2. Fetches all journal entries and calculates balances
+3. Returns formatted results with totals
+
+IMPORTANT: You do NOT need to know account codes. Search by name or category instead.
+Examples:
+- { "search": "cash" } - finds all cash accounts
+- { "search": "SLW" } - finds SLW liability accounts
+- { "subtype": "Bank" } - all bank accounts
+- { "type": "LIABILITY" } - all liability accounts
+- { "subtype": "Accounts Receivable" } - AR accounts`,
     input_schema: {
       type: 'object',
       properties: {
-        account_codes: {
+        search: {
+          type: 'string',
+          description: 'Search accounts by name (e.g., "cash", "SLW", "payroll", "revenue"). Case-insensitive.'
+        },
+        type: {
+          type: 'string',
+          enum: ['ASSET', 'LIABILITY', 'EQUITY', 'EXPENSE', 'INCOME'],
+          description: 'Filter by account type'
+        },
+        subtype: {
+          type: 'string',
+          description: 'Filter by account subtype (e.g., "Cash", "Bank", "Accounts Receivable", "Accounts Payable")'
+        },
+        codes: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Array of GL account codes to get balances for (e.g., ["24000", "24001"] for SLW accounts)'
+          description: 'Specific account codes if known (usually not needed - use search instead)'
         }
-      },
-      required: ['account_codes']
+      }
+    }
+  },
+  // WORKFLOW: List Account Categories - helps discover what's available
+  {
+    name: 'list_account_categories',
+    description: 'Lists all account categories and subtypes in Rillet. Use this to discover what accounts exist before querying balances. Shows account types (ASSET, LIABILITY, etc.) and subtypes (Cash, Bank, AR, AP, etc.) with example accounts.',
+    input_schema: {
+      type: 'object',
+      properties: {}
     }
   },
   // Direct Rillet API via MCP execute-request
