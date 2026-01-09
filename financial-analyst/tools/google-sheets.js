@@ -373,11 +373,26 @@ class GoogleSheetsClient {
         };
       }
 
+      // Helper to parse formatted numbers from spreadsheet (handles commas, currency, dashes, parentheses)
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return 0;
+        const str = val.toString().trim();
+        // Check for dash/empty representing zero
+        if (str === '' || str === '-' || /^\s*-\s*$/.test(str)) return 0;
+        // Check for parentheses (negative number)
+        const isNegative = str.startsWith('(') && str.endsWith(')');
+        // Remove currency symbols, commas, parentheses, spaces
+        const cleaned = str.replace(/[$,()%\s]/g, '');
+        const num = parseFloat(cleaned);
+        if (isNaN(num)) return 0;
+        return isNegative ? -num : num;
+      };
+
       // Calculate totals if Amount column exists
       let total = null;
       if (amountCol >= 0) {
         total = filtered.reduce((sum, row) => {
-          const val = parseFloat(row[headers[amountCol]]) || 0;
+          const val = parseNumber(row[headers[amountCol]]);
           return sum + val;
         }, 0);
       }
@@ -387,11 +402,20 @@ class GoogleSheetsClient {
       if (metricCol >= 0 && amountCol >= 0) {
         for (const row of filtered) {
           const metricName = row[headers[metricCol]];
-          const amount = parseFloat(row[headers[amountCol]]) || 0;
+          const amount = parseNumber(row[headers[amountCol]]);
           if (metricName) {
             metricSummary[metricName] = (metricSummary[metricName] || 0) + amount;
           }
         }
+      }
+
+      // Log a sample of parsed values for debugging
+      if (filtered.length > 0 && amountCol >= 0) {
+        const sampleValues = filtered.slice(0, 5).map(r => ({
+          raw: r[headers[amountCol]],
+          parsed: parseNumber(r[headers[amountCol]])
+        }));
+        console.log(`[Sheets] Sample parsed values: ${JSON.stringify(sampleValues)}`);
       }
 
       return {

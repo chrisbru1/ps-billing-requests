@@ -872,17 +872,28 @@ app.command('/fpabot', async ({ command, ack, client, logger }) => {
 // Handle thread replies to FPA Bot messages
 // This enables conversation continuity - users can reply in the thread to ask follow-up questions
 app.message(async ({ message, client, logger }) => {
+  // Debug: log all messages to see what we're receiving
+  logger.info(`[FPA Bot Thread] Received message: channel=${message.channel}, thread_ts=${message.thread_ts}, ts=${message.ts}, text=${message.text?.substring(0, 50)}...`);
+
   // Only process messages that are in a thread (have thread_ts)
-  if (!message.thread_ts) return;
+  if (!message.thread_ts) {
+    logger.info(`[FPA Bot Thread] Skipping: no thread_ts`);
+    return;
+  }
 
   // Ignore bot messages to prevent loops
-  if (message.bot_id || message.subtype === 'bot_message') return;
+  if (message.bot_id || message.subtype === 'bot_message') {
+    logger.info(`[FPA Bot Thread] Skipping: bot message (bot_id=${message.bot_id}, subtype=${message.subtype})`);
+    return;
+  }
 
   // Only respond in FPA channels
   if (!FPA_CHANNEL_IDS.includes(message.channel)) {
-    logger.info(`[FPA Bot] Thread reply in non-FPA channel: ${message.channel}, FPA channels: ${FPA_CHANNEL_IDS.join(',')}`);
+    logger.info(`[FPA Bot Thread] Skipping: non-FPA channel. channel=${message.channel}, FPA_CHANNEL_IDS=${FPA_CHANNEL_IDS.join(',')}`);
     return;
   }
+
+  logger.info(`[FPA Bot Thread] Processing thread reply in FPA channel...`);
 
   // Check if the thread was started by the bot (our messages have the question context)
   // We look for threads where we've previously responded
