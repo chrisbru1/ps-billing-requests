@@ -46,12 +46,31 @@ async function calculateAccountBalances(accountCodes) {
     const response = await fetch(url.toString(), {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
+
+    if (!response.ok) {
+      console.error(`[Rillet] API error: ${response.status} ${response.statusText}`);
+      return { error: `Rillet API error: ${response.status}`, is_error: true };
+    }
+
     const data = await response.json();
     pageCount++;
 
     console.log(`[Rillet] Fetched page ${pageCount}, entries: ${data.journal_entries?.length || 0}`);
 
+    // Debug: log first entry structure on first page
+    if (pageCount === 1 && data.journal_entries?.length > 0) {
+      const firstEntry = data.journal_entries[0];
+      console.log(`[Rillet] First entry keys: ${Object.keys(firstEntry).join(', ')}`);
+      console.log(`[Rillet] First entry has items: ${!!firstEntry.items}, count: ${firstEntry.items?.length || 0}`);
+      if (firstEntry.items?.length > 0) {
+        const firstItem = firstEntry.items[0];
+        console.log(`[Rillet] First item keys: ${Object.keys(firstItem).join(', ')}`);
+        console.log(`[Rillet] First item account_code: ${firstItem.account_code}, side: ${firstItem.side}, amount: ${JSON.stringify(firstItem.amount)}`);
+      }
+    }
+
     // Process journal entries
+    let matchesThisPage = 0;
     for (const entry of data.journal_entries || []) {
       for (const item of entry.items || []) {
         const itemCode = item.account_code;
@@ -63,9 +82,11 @@ async function calculateAccountBalances(accountCodes) {
             balances[itemCode].credits += amount;
           }
           balances[itemCode].transactions++;
+          matchesThisPage++;
         }
       }
     }
+    console.log(`[Rillet] Page ${pageCount} matches for requested accounts: ${matchesThisPage}`);
 
     cursor = data.pagination?.next_cursor || null;
   } while (cursor && pageCount < maxPages);
