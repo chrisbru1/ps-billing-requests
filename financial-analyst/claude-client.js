@@ -5,7 +5,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 class ClaudeClient {
   constructor() {
     this.client = null;
-    this.model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514'; // Sonnet by default, configurable
+    this.model = process.env.CLAUDE_MODEL || 'claude-haiku-4-20250514'; // Haiku for speed and lower token usage
   }
 
   initialize() {
