@@ -81,12 +81,12 @@ class GoogleSheetsClient {
       const availableTabs = tabsResponse.data.sheets.map(s => s.properties.title);
       console.log(`[Sheets] Available tabs: ${availableTabs.join(', ')}`);
 
-      // Find the right tab
+      // Smart tab selection based on what's being searched
       let targetSheet = sheet_name;
 
+      // If statement_type is explicitly provided, use it
       if (!targetSheet && statement_type) {
         const stLower = statement_type.toLowerCase();
-        // Try to find a matching tab
         targetSheet = availableTabs.find(tab => {
           const tabLower = tab.toLowerCase();
           if (stLower === 'income_statement' || stLower === 'income' || stLower === 'is' || stLower === 'pl' || stLower === 'pnl') {
@@ -102,12 +102,67 @@ class GoogleSheetsClient {
         });
       }
 
+      // Try to read the Context tab to get search term mappings
+      let contextMappings = {};
+      try {
+        const contextResponse = await this.sheets.spreadsheets.values.get({
+          spreadsheetId: sheetId,
+          range: "'Context for Claude'!A:C"
+        });
+        const contextRows = contextResponse.data.values || [];
+        // Skip header row, build mapping: searchTerm -> { tab, column }
+        for (let i = 1; i < contextRows.length; i++) {
+          const [searchTerm, tab, column] = contextRows[i];
+          if (searchTerm && tab) {
+            contextMappings[searchTerm.toLowerCase()] = { tab, column };
+          }
+        }
+        console.log(`[Sheets] Loaded ${Object.keys(contextMappings).length} context mappings`);
+      } catch (e) {
+        console.log(`[Sheets] No Context tab or error reading it: ${e.message}`);
+      }
+
+      // Smart inference: use Context mappings first, then fall back to keywords
+      if (!targetSheet && metric) {
+        const metricLower = metric.toLowerCase();
+
+        // Check exact match in context mappings
+        if (contextMappings[metricLower]) {
+          targetSheet = contextMappings[metricLower].tab;
+          console.log(`[Sheets] Found exact match in Context: ${metric} -> ${targetSheet}`);
+        } else {
+          // Check partial matches in context mappings
+          for (const [term, mapping] of Object.entries(contextMappings)) {
+            if (metricLower.includes(term) || term.includes(metricLower)) {
+              targetSheet = mapping.tab;
+              console.log(`[Sheets] Found partial match in Context: ${metric} ~ ${term} -> ${targetSheet}`);
+              break;
+            }
+          }
+        }
+
+        // Fall back to keyword-based inference
+        if (!targetSheet) {
+          const incomeKeywords = ['revenue', 'cogs', 'expense', 'cost', 'fee', 'labor', 'profit'];
+          const balanceKeywords = ['asset', 'liability', 'equity', 'cash', 'receivable', 'payable'];
+          const metricsKeywords = ['headcount', 'arr', 'bookings', 'sms', 'shops', 'volume'];
+
+          if (incomeKeywords.some(k => metricLower.includes(k))) {
+            targetSheet = availableTabs.find(t => t.toLowerCase().includes('income'));
+          } else if (balanceKeywords.some(k => metricLower.includes(k))) {
+            targetSheet = availableTabs.find(t => t.toLowerCase().includes('balance'));
+          } else if (metricsKeywords.some(k => metricLower.includes(k))) {
+            targetSheet = availableTabs.find(t => t.toLowerCase().includes('metric'));
+          }
+        }
+      }
+
       // Default: use first tab that looks like income statement, or just the first tab
       if (!targetSheet) {
         targetSheet = availableTabs.find(t => t.toLowerCase().includes('income')) || availableTabs[0];
       }
 
-      console.log(`[Sheets] Using tab: ${targetSheet}`);
+      console.log(`[Sheets] Using tab: ${targetSheet} (inferred from query)`);
       const range = `'${targetSheet}'!A:Z`;
 
       const response = await this.sheets.spreadsheets.values.get({
@@ -150,10 +205,13 @@ class GoogleSheetsClient {
 
       // Filter by parameters
       const filtered = data.filter(row => {
-        // Filter by metric name
+        // Filter by metric name - search in Metric column AND Rollup column
         if (metric) {
+          const metricLower = metric.toLowerCase();
           const rowMetric = (metricCol >= 0 ? row[headers[metricCol]] : row[headers[0]])?.toString().toLowerCase() || '';
-          if (!rowMetric.includes(metric.toLowerCase())) return false;
+          const rowRollup = rollupCol >= 0 ? (row[headers[rollupCol]]?.toString().toLowerCase() || '') : '';
+          // Match if metric OR rollup contains the search term
+          if (!rowMetric.includes(metricLower) && !rowRollup.includes(metricLower)) return false;
         }
 
         // Filter by month (e.g., "Jan", "Feb", "Jan-26")
