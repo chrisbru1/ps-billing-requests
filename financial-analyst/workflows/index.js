@@ -157,11 +157,24 @@ async function findAccounts(criteria = {}) {
 }
 
 /**
- * Calculate balances for given account codes by summing all journal entries
+ * Cache for ALL account balances - calculated once, used for all queries
  */
-async function calculateBalances(accountCodes) {
-  if (!accountCodes || accountCodes.length === 0) {
-    return {};
+let allBalancesCache = null;
+let allBalancesCacheTime = null;
+const BALANCE_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Calculate balances for ALL accounts (cached)
+ * This is slow but only runs once per cache period
+ */
+async function getAllAccountBalances(forceRefresh = false) {
+  const now = Date.now();
+
+  // Return cached if valid
+  if (!forceRefresh && allBalancesCache && allBalancesCacheTime && (now - allBalancesCacheTime) < BALANCE_CACHE_TTL) {
+    const cacheAge = Math.round((now - allBalancesCacheTime) / 1000);
+    console.log(`[Workflow] Using cached balances (${cacheAge}s old, ${Object.keys(allBalancesCache).length} accounts)`);
+    return allBalancesCache;
   }
 
   const accounts = await getAllAccounts();
@@ -170,19 +183,20 @@ async function calculateBalances(accountCodes) {
     accountsMap[acc.code] = acc;
   }
 
-  // Initialize balances
+  // Initialize balances for ALL accounts
   const balances = {};
-  for (const code of accountCodes) {
-    balances[code] = { debits: 0, credits: 0, transactions: 0 };
+  for (const acc of accounts) {
+    balances[acc.code] = { debits: 0, credits: 0, transactions: 0 };
   }
 
   // Paginate through ALL journal entries
   let cursor = null;
   let pageCount = 0;
   let totalEntries = 0;
-  const maxPages = 200; // Higher limit for complete data
+  const maxPages = 500; // Higher limit for complete data
 
-  console.log(`[Workflow] Calculating balances for ${accountCodes.length} accounts...`);
+  console.log(`[Workflow] Calculating balances for ALL ${accounts.length} accounts (this may take a while)...`);
+  const startTime = Date.now();
 
   do {
     const data = await rilletFetch('/journal-entries', {
@@ -194,11 +208,11 @@ async function calculateBalances(accountCodes) {
     const entries = data.journal_entries || [];
     totalEntries += entries.length;
 
-    // Process journal entries
+    // Process ALL journal entry items
     for (const entry of entries) {
       for (const item of entry.items || []) {
         const itemCode = item.account_code;
-        if (itemCode && balances[itemCode] !== undefined) {
+        if (itemCode && balances[itemCode]) {
           const amount = parseFloat(item.amount?.amount || 0);
           if (item.side === 'DEBIT') {
             balances[itemCode].debits += amount;
@@ -212,16 +226,18 @@ async function calculateBalances(accountCodes) {
 
     cursor = data.pagination?.next_cursor || null;
 
-    if (pageCount % 10 === 0) {
-      console.log(`[Workflow] Processed ${pageCount} pages, ${totalEntries} entries...`);
+    if (pageCount % 20 === 0) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[Workflow] Progress: ${pageCount} pages, ${totalEntries} entries, ${elapsed}s elapsed...`);
     }
   } while (cursor && pageCount < maxPages);
 
-  console.log(`[Workflow] Finished: ${pageCount} pages, ${totalEntries} total entries`);
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  console.log(`[Workflow] Finished: ${pageCount} pages, ${totalEntries} entries in ${elapsed}s`);
 
   // Calculate final balances with account metadata
   const results = {};
-  for (const code of accountCodes) {
+  for (const code of Object.keys(balances)) {
     const acc = accountsMap[code] || {};
     const b = balances[code];
 
@@ -239,6 +255,33 @@ async function calculateBalances(accountCodes) {
       balance,
       transactions: b.transactions
     };
+  }
+
+  // Cache the results
+  allBalancesCache = results;
+  allBalancesCacheTime = now;
+  console.log(`[Workflow] Cached balances for ${Object.keys(results).length} accounts`);
+
+  return results;
+}
+
+/**
+ * Get balances for specific account codes (uses cache)
+ */
+async function calculateBalances(accountCodes) {
+  if (!accountCodes || accountCodes.length === 0) {
+    return {};
+  }
+
+  // Get all balances from cache
+  const allBalances = await getAllAccountBalances();
+
+  // Return only requested accounts
+  const results = {};
+  for (const code of accountCodes) {
+    if (allBalances[code]) {
+      results[code] = allBalances[code];
+    }
   }
 
   return results;
@@ -399,11 +442,43 @@ async function listAccountCategories() {
 // EXPORTS
 // ============================================================================
 
+/**
+ * Refresh the balance cache manually
+ */
+async function refreshBalanceCache() {
+  console.log('[Workflow] Force refreshing balance cache...');
+  return getAllAccountBalances(true);
+}
+
+/**
+ * Get cache status
+ */
+function getCacheStatus() {
+  const now = Date.now();
+  if (!allBalancesCache || !allBalancesCacheTime) {
+    return { cached: false, message: 'No balance cache - first query will be slow (~2 min)' };
+  }
+  const ageSeconds = Math.round((now - allBalancesCacheTime) / 1000);
+  const ageMinutes = Math.round(ageSeconds / 60);
+  const remainingSeconds = Math.round((BALANCE_CACHE_TTL - (now - allBalancesCacheTime)) / 1000);
+  return {
+    cached: true,
+    accounts: Object.keys(allBalancesCache).length,
+    age_seconds: ageSeconds,
+    age_human: ageMinutes > 0 ? `${ageMinutes}m ${ageSeconds % 60}s` : `${ageSeconds}s`,
+    expires_in_seconds: Math.max(0, remainingSeconds),
+    message: `Cache valid for ${Math.max(0, Math.round(remainingSeconds / 60))} more minutes`
+  };
+}
+
 module.exports = {
   accountBalance,
   listAccountCategories,
+  refreshBalanceCache,
+  getCacheStatus,
   // Helper functions for other workflows
   getAllAccounts,
+  getAllAccountBalances,
   findAccounts,
   calculateBalances,
   rilletFetch

@@ -133,6 +133,15 @@ const toolImplementations = {
   // WORKFLOW TOOLS (preferred - these are smarter and handle orchestration)
   'account_balance': async (input) => workflows.accountBalance(input),
   'list_account_categories': async () => workflows.listAccountCategories(),
+  'balance_cache_status': async () => workflows.getCacheStatus(),
+  'refresh_balance_cache': async () => {
+    const result = await workflows.refreshBalanceCache();
+    return {
+      success: true,
+      accounts_cached: Object.keys(result).length,
+      message: 'Balance cache refreshed. Subsequent queries will be fast.'
+    };
+  },
 
   // Google Sheets tools
   'get_budget_data': async (input) => googleSheets.getBudgetData(input),
