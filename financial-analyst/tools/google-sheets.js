@@ -110,6 +110,13 @@ class GoogleSheetsClient {
           range: "'Context for Claude'!A:C"
         });
         const contextRows = contextResponse.data.values || [];
+        console.log(`[Sheets] Context tab has ${contextRows.length} rows`);
+        if (contextRows.length > 0) {
+          console.log(`[Sheets] Context headers: ${JSON.stringify(contextRows[0])}`);
+        }
+        if (contextRows.length > 1) {
+          console.log(`[Sheets] Context first data row: ${JSON.stringify(contextRows[1])}`);
+        }
         // Skip header row, build mapping: searchTerm -> { tab, column }
         for (let i = 1; i < contextRows.length; i++) {
           const [searchTerm, tab, column] = contextRows[i];
@@ -118,8 +125,10 @@ class GoogleSheetsClient {
           }
         }
         console.log(`[Sheets] Loaded ${Object.keys(contextMappings).length} context mappings`);
+        console.log(`[Sheets] Sample mappings: ${JSON.stringify(Object.entries(contextMappings).slice(0, 3))}`);
       } catch (e) {
         console.log(`[Sheets] No Context tab or error reading it: ${e.message}`);
+        console.log(`[Sheets] Context error stack: ${e.stack}`);
       }
 
       // Smart inference: use Context mappings first, then fall back to keywords
@@ -178,10 +187,21 @@ class GoogleSheetsClient {
         };
       }
 
-      // Parse data - first row is headers
-      const headers = rows[0].map(h => h?.toString().trim());
+      // Find the header row (look for "Account" or "Metric" in first 20 rows)
+      let headerRowIndex = 0;
+      for (let i = 0; i < Math.min(20, rows.length); i++) {
+        const rowStr = (rows[i] || []).join(' ').toLowerCase();
+        if (rowStr.includes('account') || rowStr.includes('metric')) {
+          headerRowIndex = i;
+          console.log(`[Sheets] Found header row at index ${i}`);
+          break;
+        }
+      }
+
+      // Parse data - header row found dynamically
+      const headers = rows[headerRowIndex].map(h => h?.toString().trim());
       const headersLower = headers.map(h => h?.toLowerCase());
-      const data = rows.slice(1).map(row => {
+      const data = rows.slice(headerRowIndex + 1).map(row => {
         const obj = {};
         headers.forEach((header, i) => {
           obj[header] = row[i] || null;
@@ -189,19 +209,61 @@ class GoogleSheetsClient {
         return obj;
       });
 
-      // Find column indices for the normalized format
-      const metricCol = headersLower.findIndex(h => h === 'metric');
+      // Find column indices - support both normalized format and Aleph export format
+      let metricCol = headersLower.findIndex(h => h === 'metric');
       const monthCol = headersLower.findIndex(h => h === 'month');
       const quarterCol = headersLower.findIndex(h => h === 'quarter');
       const yearCol = headersLower.findIndex(h => h === 'year');
-      const amountCol = headersLower.findIndex(h => h === 'amount');
+      let amountCol = headersLower.findIndex(h => h === 'amount');
       const deptCol = headersLower.findIndex(h => h?.includes('department'));
       const accountCol = headersLower.findIndex(h => h === 'account');
       const vendorCol = headersLower.findIndex(h => h === 'vendor');
       const rollupCol = headersLower.findIndex(h => h?.includes('rollup'));
 
-      console.log(`[Sheets] Tab: ${targetSheet}, Columns: metric=${metricCol}, month=${monthCol}, quarter=${quarterCol}, year=${yearCol}, amount=${amountCol}`);
-      console.log(`[Sheets] Total rows: ${data.length}, Headers: ${headers.join(', ')}`);
+      // Aleph format: "Consolidated Rollup Aleph" is the metric, "value" is the amount
+      if (metricCol < 0 && rollupCol >= 0) {
+        metricCol = rollupCol; // Use rollup as the metric column
+        console.log(`[Sheets] Using rollup column as metric (Aleph format)`);
+      }
+      if (amountCol < 0) {
+        amountCol = headersLower.findIndex(h => h === 'value');
+        if (amountCol >= 0) {
+          console.log(`[Sheets] Using 'value' column as amount (Aleph format)`);
+        }
+      }
+
+      console.log(`[Sheets] Tab: ${targetSheet}, Columns: metric=${metricCol}, month=${monthCol}, quarter=${quarterCol}, year=${yearCol}, amount=${amountCol}, rollup=${rollupCol}`);
+      console.log(`[Sheets] Total rows: ${data.length}`);
+      console.log(`[Sheets] Headers (first 10): ${headers.slice(0, 10).join(' | ')}`);
+      console.log(`[Sheets] Headers (raw): ${JSON.stringify(headers.slice(0, 10))}`);
+      if (data.length > 0) {
+        console.log(`[Sheets] First row sample: ${JSON.stringify(data[0])}`);
+      }
+
+      // Helper to extract year from date string like "2025-04-01" or date object
+      const extractYear = (dateVal) => {
+        if (!dateVal) return null;
+        const str = dateVal.toString();
+        // Try to find a 4-digit year
+        const match = str.match(/20\d{2}/);
+        return match ? match[0] : null;
+      };
+
+      // Helper to extract quarter from date
+      const extractQuarter = (dateVal) => {
+        if (!dateVal) return null;
+        const str = dateVal.toString();
+        // Parse month from date like "2025-04-01"
+        const match = str.match(/\d{4}-(\d{2})/);
+        if (match) {
+          const monthNum = parseInt(match[1]);
+          if (monthNum <= 3) return 'Q1';
+          if (monthNum <= 6) return 'Q2';
+          if (monthNum <= 9) return 'Q3';
+          return 'Q4';
+        }
+        return null;
+      };
 
       // Filter by parameters
       const filtered = data.filter(row => {
@@ -214,22 +276,37 @@ class GoogleSheetsClient {
           if (!rowMetric.includes(metricLower) && !rowRollup.includes(metricLower)) return false;
         }
 
-        // Filter by month (e.g., "Jan", "Feb", "Jan-26")
+        // Get date value for month/quarter/year filtering
+        const dateVal = monthCol >= 0 ? row[headers[monthCol]] : null;
+
+        // Filter by month (e.g., "Jan", "Feb", "Jan-26", or "2025-04")
         if (month && monthCol >= 0) {
           const rowMonth = row[headers[monthCol]]?.toString().toLowerCase() || '';
           if (!rowMonth.includes(month.toLowerCase())) return false;
         }
 
-        // Filter by quarter (e.g., "Q1", "Q2")
-        if (quarter && quarterCol >= 0) {
-          const rowQuarter = row[headers[quarterCol]]?.toString().toLowerCase() || '';
-          if (!rowQuarter.includes(quarter.toLowerCase())) return false;
+        // Filter by quarter (e.g., "Q1", "Q2") - extract from date if no quarter column
+        if (quarter) {
+          if (quarterCol >= 0) {
+            const rowQuarter = row[headers[quarterCol]]?.toString().toLowerCase() || '';
+            if (!rowQuarter.includes(quarter.toLowerCase())) return false;
+          } else {
+            // Extract quarter from Month date column
+            const rowQuarter = extractQuarter(dateVal);
+            if (!rowQuarter || !rowQuarter.toLowerCase().includes(quarter.toLowerCase())) return false;
+          }
         }
 
-        // Filter by year (e.g., "2025", "2026")
-        if (year && yearCol >= 0) {
-          const rowYear = row[headers[yearCol]]?.toString() || '';
-          if (!rowYear.includes(year.toString())) return false;
+        // Filter by year (e.g., "2025", "2026") - extract from date if no year column
+        if (year) {
+          if (yearCol >= 0) {
+            const rowYear = row[headers[yearCol]]?.toString() || '';
+            if (!rowYear.includes(year.toString())) return false;
+          } else {
+            // Extract year from Month date column
+            const rowYear = extractYear(dateVal);
+            if (!rowYear || !rowYear.includes(year.toString())) return false;
+          }
         }
 
         // Filter by department
