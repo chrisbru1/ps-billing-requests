@@ -35,7 +35,31 @@ class GoogleSheetsClient {
     }
   }
 
-  async getBudgetData({ metric, period, department, sheet_name }) {
+  /**
+   * Get the context/instructions tab that explains the budget data structure
+   */
+  async getBudgetContext() {
+    await this.initialize();
+
+    const sheetId = process.env.GOOGLE_BUDGET_SHEET_ID;
+    if (!this.sheets || !sheetId) {
+      return null;
+    }
+
+    try {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: 'Context for Claude!A:Z'
+      });
+
+      return response.data.values;
+    } catch (error) {
+      console.log('[Sheets] No Context for Claude tab found:', error.message);
+      return null;
+    }
+  }
+
+  async getBudgetData({ metric, period, department, sheet_name, account, vendor, rollup, statement_type }) {
     await this.initialize();
 
     const sheetId = process.env.GOOGLE_BUDGET_SHEET_ID;
@@ -49,7 +73,28 @@ class GoogleSheetsClient {
     }
 
     try {
-      const range = sheet_name ? `${sheet_name}!A:Z` : 'Budget Summary!A:Z';
+      // Map statement_type to actual tab names in the budget sheet
+      let targetSheet = sheet_name;
+      if (!targetSheet && statement_type) {
+        const sheetMap = {
+          'income_statement': 'Income Statement | Budget | Aleph',
+          'income': 'Income Statement | Budget | Aleph',
+          'is': 'Income Statement | Budget | Aleph',
+          'pl': 'Income Statement | Budget | Aleph',
+          'pnl': 'Income Statement | Budget | Aleph',
+          'balance_sheet': 'Balance Sheet | Budget | Aleph',
+          'balance': 'Balance Sheet | Budget | Aleph',
+          'bs': 'Balance Sheet | Budget | Aleph'
+        };
+        targetSheet = sheetMap[statement_type.toLowerCase()];
+      }
+
+      // Default to Income Statement if no sheet specified
+      if (!targetSheet) {
+        targetSheet = 'Income Statement | Budget | Aleph';
+      }
+
+      const range = `'${targetSheet}'!A:ZZ`;
 
       const response = await this.sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
@@ -59,13 +104,14 @@ class GoogleSheetsClient {
       const rows = response.data.values;
       if (!rows || rows.length === 0) {
         return {
-          error: 'No data found in budget sheet',
-          query: { metric, period, department, sheet_name }
+          error: `No data found in budget sheet tab: ${targetSheet}`,
+          query: { metric, period, department, sheet_name, statement_type }
         };
       }
 
-      // Parse data - assume first row is headers
-      const headers = rows[0].map(h => h?.toLowerCase().trim());
+      // Parse data - first row is headers
+      const headers = rows[0].map(h => h?.toString().trim());
+      const headersLower = headers.map(h => h?.toLowerCase());
       const data = rows.slice(1).map(row => {
         const obj = {};
         headers.forEach((header, i) => {
@@ -74,45 +120,72 @@ class GoogleSheetsClient {
         return obj;
       });
 
+      // Find column indices for filtering
+      const accountCol = headersLower.findIndex(h => h === 'account');
+      const vendorCol = headersLower.findIndex(h => h === 'vendor');
+      const deptCol = headersLower.findIndex(h => h?.includes('department'));
+      const rollupCol = headersLower.findIndex(h => h?.includes('consolidated rollup'));
+
       // Filter by parameters
       const filtered = data.filter(row => {
-        // Check metric match (flexible matching)
-        const metricMatch = !metric || Object.entries(row).some(([key, value]) => {
-          return (key.includes('metric') || key.includes('account') || key.includes('category') || key.includes('name')) &&
-                 value?.toLowerCase().includes(metric.toLowerCase());
-        });
+        // Filter by account (GL Account from Rillet)
+        if (account) {
+          const rowAccount = row[headers[accountCol]]?.toString().toLowerCase() || '';
+          if (!rowAccount.includes(account.toLowerCase())) return false;
+        }
 
-        // Check period match
-        const periodMatch = !period || Object.entries(row).some(([key, value]) => {
-          return (key.includes('period') || key.includes('date') || key.includes('month') || key.includes('quarter') || key.includes('year')) &&
-                 value?.toString().toLowerCase().includes(period.toLowerCase());
-        });
+        // Filter by vendor
+        if (vendor && vendorCol >= 0) {
+          const rowVendor = row[headers[vendorCol]]?.toString().toLowerCase() || '';
+          if (!rowVendor.includes(vendor.toLowerCase())) return false;
+        }
 
-        // Check department match
-        const deptMatch = !department || Object.entries(row).some(([key, value]) => {
-          return (key.includes('department') || key.includes('dept') || key.includes('cost center')) &&
-                 value?.toLowerCase().includes(department.toLowerCase());
-        });
+        // Filter by department
+        if (department && deptCol >= 0) {
+          const rowDept = row[headers[deptCol]]?.toString().toLowerCase() || '';
+          if (!rowDept.includes(department.toLowerCase())) return false;
+        }
 
-        return metricMatch && periodMatch && deptMatch;
+        // Filter by rollup (FP&A grouping)
+        if (rollup && rollupCol >= 0) {
+          const rowRollup = row[headers[rollupCol]]?.toString().toLowerCase() || '';
+          if (!rowRollup.includes(rollup.toLowerCase())) return false;
+        }
+
+        // Filter by metric (search across account and rollup)
+        if (metric) {
+          const metricLower = metric.toLowerCase();
+          const accountMatch = row[headers[accountCol]]?.toString().toLowerCase().includes(metricLower);
+          const rollupMatch = rollupCol >= 0 && row[headers[rollupCol]]?.toString().toLowerCase().includes(metricLower);
+          if (!accountMatch && !rollupMatch) return false;
+        }
+
+        // Filter by period (search in headers that look like dates/months)
+        if (period) {
+          // Period filtering is complex - usually columns are months
+          // For now, include all rows and let Claude interpret the period columns
+        }
+
+        return true;
       });
 
       return {
         source: 'Google Sheets - Budget (Aleph FP&A sync)',
         sheet_id: sheetId,
-        sheet_name: sheet_name || 'Budget Summary',
-        query: { metric, period, department },
-        results: filtered.slice(0, 100), // Limit to avoid token overload
+        sheet_name: targetSheet,
+        query: { metric, period, department, account, vendor, rollup, statement_type },
+        results: filtered.slice(0, 200), // Limit to avoid token overload
         row_count: filtered.length,
         total_rows_in_sheet: data.length,
-        headers: headers
+        headers: headers,
+        hint: 'Month columns contain budget amounts. Use "Consolidated Rollup Aleph" for FP&A groupings.'
       };
 
     } catch (error) {
       return {
         error: `Failed to fetch budget data: ${error.message}`,
         is_error: true,
-        query: { metric, period, department, sheet_name }
+        query: { metric, period, department, sheet_name, statement_type }
       };
     }
   }

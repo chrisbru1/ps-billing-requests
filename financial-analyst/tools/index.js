@@ -144,6 +144,20 @@ const toolImplementations = {
   },
 
   // Google Sheets tools
+  'get_budget_context': async () => {
+    const context = await googleSheets.getBudgetContext();
+    if (!context) {
+      return {
+        error: 'Could not read budget context tab. Make sure "Context for Claude" tab exists.',
+        is_error: true
+      };
+    }
+    return {
+      source: 'Google Sheets - Budget Context',
+      context: context,
+      hint: 'This explains the budget data structure. Use get_budget_data to query actual budget numbers.'
+    };
+  },
   'get_budget_data': async (input) => googleSheets.getBudgetData(input),
   'get_financial_model': async (input) => googleSheets.getFinancialModel(input),
   'list_available_sheets': async (input) => googleSheets.listAvailableSheets(input),

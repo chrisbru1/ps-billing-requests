@@ -23,6 +23,67 @@ You have access to:
 1. **Rillet (ERP)** - Actuals, GL, invoices, bills, contracts, ARR
 2. **Google Sheets** - Budget (from Aleph FP&A) and financial model
 
+## Budget Data Structure (Google Sheets from Aleph)
+
+The budget spreadsheet has these tabs:
+- **Income Statement | Budget | Aleph** - P&L budget data
+- **Balance Sheet | Budget | Aleph** - Balance sheet budget data
+- **Context for Claude** - Instructions on how to interpret the data
+
+**Budget columns:**
+| Field | Tab | Description |
+|-------|-----|-------------|
+| Account | Both | GL Account code (matches Rillet) |
+| Vendor | Income Statement | Vendor name for expenses |
+| Department Aleph | Income Statement | Department for the line item |
+| Consolidated Rollup Aleph | Both | FP&A grouping (use this for high-level queries) |
+| Month columns | Both | Budget amounts by month |
+
+**How to query budget:**
+- Use \`statement_type: "income_statement"\` or \`"balance_sheet"\` to pick the tab
+- Use \`rollup\` to filter by FP&A grouping (e.g., "Revenue", "COGS", "S&M")
+- Use \`department\` to filter by team
+- Use \`account\` to match specific GL accounts from Rillet
+
+## Postscript Financial Metrics (IMPORTANT!)
+
+When calculating these metrics, use these EXACT rollup line items from the budget:
+
+**Gross Revenue** = Sum of:
+- Messaging Revenue
+- Platform Revenue
+- Short Code Revenue
+- Marketing AI Revenue
+- PS Plus Revenue
+- Shopper Revenue
+- SMS Sales Revenue
+- Fondue Revenue
+
+**Net Revenue** = Gross Revenue - Twilio Carrier Fees
+
+**Gross Profit** = Net Revenue - COGS, where COGS includes:
+- Twilio Messaging
+- Twilio Short Codes
+- Hosting
+- Prepaid Cards
+- MAI OpenAI Costs
+- SMS Sales COGS
+- Postscript Plus Servicing Costs
+- CXAs Servicing Costs
+
+**Gross Margin** = Gross Profit / Net Revenue (express as percentage with 1 decimal, e.g., "72.3%")
+
+**EBITDA** = Gross Profit - Operating Expenses, where OpEx includes:
+- Indirect Labor
+- T&E
+- Tech & IT
+- Professional Fees
+- Marketing Expense
+- Payment Processing
+- Other OpEx
+- Recruiting Expense
+- Bad Debt
+
 ## How to Query Account Balances (IMPORTANT!)
 
 Use the \`account_balance\` workflow tool. It automatically looks up accounts and calculates balances.
@@ -199,29 +260,59 @@ Examples:
   },
   // Google Sheets tools for budget and model
   {
+    name: 'get_budget_context',
+    description: 'Reads the "Context for Claude" tab from the budget spreadsheet. Use this FIRST when working with budget data to understand the data structure and field definitions.',
+    input_schema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
     name: 'get_budget_data',
-    description: 'Retrieves budget data from Google Sheets (synced from Aleph FP&A). Use this to get planned/budgeted figures for revenue, expenses, headcount, etc.',
+    description: `Retrieves budget data from Google Sheets (synced from Aleph FP&A).
+
+IMPORTANT: The budget has two tabs:
+- "Income Statement | Budget | Aleph" - P&L items (revenue, expenses)
+- "Balance Sheet | Budget | Aleph" - Balance sheet items (assets, liabilities)
+
+Use statement_type to pick the right tab. Use rollup for FP&A groupings like "Revenue", "COGS", "S&M", etc.`,
     input_schema: {
       type: 'object',
       properties: {
-        metric: {
+        statement_type: {
           type: 'string',
-          description: 'The budget metric to retrieve (e.g., "revenue", "cogs", "opex", "headcount", "gross_margin", "ebitda", "net_income")'
+          enum: ['income_statement', 'balance_sheet'],
+          description: 'Which financial statement to query. Use "income_statement" for P&L items, "balance_sheet" for BS items.'
         },
-        period: {
+        rollup: {
           type: 'string',
-          description: 'Time period (e.g., "Q4 2024", "FY2024", "January 2024", "2024")'
+          description: 'Filter by "Consolidated Rollup Aleph" - the FP&A grouping (e.g., "Revenue", "COGS", "S&M", "R&D", "G&A")'
+        },
+        account: {
+          type: 'string',
+          description: 'Filter by GL Account code (matches Rillet account codes)'
         },
         department: {
           type: 'string',
-          description: 'Optional department filter (e.g., "Engineering", "Sales", "Marketing", "G&A")'
+          description: 'Filter by department (Income Statement only)'
+        },
+        vendor: {
+          type: 'string',
+          description: 'Filter by vendor name (Income Statement only)'
+        },
+        metric: {
+          type: 'string',
+          description: 'General search term to find in account or rollup fields'
+        },
+        period: {
+          type: 'string',
+          description: 'Time period context (month columns contain budget amounts)'
         },
         sheet_name: {
           type: 'string',
-          description: 'Optional specific sheet tab name to query'
+          description: 'Override: specific sheet tab name to query directly'
         }
-      },
-      required: ['metric', 'period']
+      }
     }
   },
   {
