@@ -25,37 +25,26 @@ You have access to:
 
 ## Budget Data Structure (Google Sheets from Aleph)
 
-The budget spreadsheet has these tabs:
-- **Income Statement | Budget | Aleph** - P&L budget data
-- **Balance Sheet | Budget | Aleph** - Balance sheet budget data
-- **Metrics** - Operational KPIs and non-financial metrics
-- **Context for Claude** - Instructions on how to interpret the data
+The budget spreadsheet has normalized data with these columns:
+- **Metric** - The line item name (e.g., "Gross Profit", "Headcount", "New Bookings")
+- **Month** - Month name (Jan, Feb, Mar, etc.)
+- **Quarter** - Q1, Q2, Q3, Q4
+- **Year** - 2025, 2026, etc.
+- **Amount** - The budget value
 
-**Budget columns:**
-| Field | Tab | Description |
-|-------|-----|-------------|
-| Account | Both | GL Account code (matches Rillet) |
-| Vendor | Income Statement | Vendor name for expenses |
-| Department Aleph | Income Statement | Department for the line item |
-| Consolidated Rollup Aleph | Both | FP&A grouping (use this for high-level queries) |
-| Month columns | Both | Budget amounts by month |
+**Tabs:**
+- **Income Statement** - P&L items (revenue, COGS, expenses)
+- **Balance Sheet** - Assets, liabilities
+- **Metrics** - Operational KPIs (headcount, ARR, volume, bookings, etc.)
 
 **How to query budget:**
-- Use \`statement_type: "income_statement"\`, \`"balance_sheet"\`, or \`"metrics"\` to pick the tab
-- Use \`rollup\` to filter by FP&A grouping (e.g., "Revenue", "COGS", "S&M")
-- Use \`department\` to filter by team
-- Use \`account\` to match specific GL accounts from Rillet
+\`\`\`
+{ metric: "Gross Profit", year: "2026" }           → Annual Gross Profit
+{ metric: "Headcount", quarter: "Q1", year: "2026" } → Q1 headcount
+{ statement_type: "metrics", metric: "New Bookings" } → All New Bookings data
+\`\`\`
 
-**Metrics tab** contains operational KPIs:
-- Headcount, CCS Headcount
-- ARR metrics: Total Postscript ARR, SMS Marketing ARR, Fondue ARR
-- Volume: US & Canada SMS/MMS, International SMS/MMS, Payment Transaction Volume
-- Sales: New Bookings, Opportunities Created/Closed, Avg Deal Size, Conversions, Installations
-- Shops: Total Shops, Platform Fee Shops, Paid PS+ Shops
-- Short Codes: Active Free/Paid Short Codes
-- Costs: Servicing Cost (CXA, PS Plus), Cashback Volume, Prepaid Visa Card $ Issued
-- Commissions: Monthly/Quarterly Bonus P/O, Monthly/Quarterly Commissions P/O
-- Payment mix: Shopify CC %, Stripe ACH %, Stripe CC % of Revenue
+The tool returns \`total_amount\` which is the SUM of all matching rows - use this for totals!
 
 ## Postscript Financial Metrics (IMPORTANT!)
 
@@ -281,48 +270,59 @@ Examples:
   },
   {
     name: 'get_budget_data',
-    description: `Retrieves budget data from Google Sheets (synced from Aleph FP&A).
+    description: `Retrieves budget data from Google Sheets (normalized format with Metric, Month, Quarter, Year, Amount columns).
 
-IMPORTANT: The budget has two tabs:
-- "Income Statement | Budget | Aleph" - P&L items (revenue, expenses)
-- "Balance Sheet | Budget | Aleph" - Balance sheet items (assets, liabilities)
+The tool returns matching rows with amounts. Use total_amount for the sum of all matching rows.
 
-Use statement_type to pick the right tab. Use rollup for FP&A groupings like "Revenue", "COGS", "S&M", etc.`,
+Examples:
+- Gross Profit for 2026: { metric: "Gross Profit", year: "2026" } → total_amount is the annual total
+- Q1 Revenue: { metric: "Messaging Revenue", quarter: "Q1" }
+- Headcount by month: { statement_type: "metrics", metric: "Headcount" }
+
+IMPORTANT: Use the returned total_amount and Amount values directly - these are the actual budget numbers!`,
     input_schema: {
       type: 'object',
       properties: {
         statement_type: {
           type: 'string',
           enum: ['income_statement', 'balance_sheet', 'metrics'],
-          description: 'Which tab to query: "income_statement" for P&L, "balance_sheet" for BS, "metrics" for operational KPIs (headcount, ARR, volume, etc.)'
-        },
-        rollup: {
-          type: 'string',
-          description: 'Filter by "Consolidated Rollup Aleph" - the FP&A grouping (e.g., "Revenue", "COGS", "S&M", "R&D", "G&A")'
-        },
-        account: {
-          type: 'string',
-          description: 'Filter by GL Account code (matches Rillet account codes)'
-        },
-        department: {
-          type: 'string',
-          description: 'Filter by department (Income Statement only)'
-        },
-        vendor: {
-          type: 'string',
-          description: 'Filter by vendor name (Income Statement only)'
+          description: 'Which tab: "income_statement" for P&L, "balance_sheet" for BS, "metrics" for KPIs'
         },
         metric: {
           type: 'string',
-          description: 'General search term to find in account or rollup fields'
+          description: 'Filter by metric name (e.g., "Gross Profit", "Revenue", "Headcount", "New Bookings")'
         },
-        period: {
+        month: {
           type: 'string',
-          description: 'Time period context (month columns contain budget amounts)'
+          description: 'Filter by month (e.g., "Jan", "Feb", "Mar")'
+        },
+        quarter: {
+          type: 'string',
+          description: 'Filter by quarter (e.g., "Q1", "Q2", "Q3", "Q4")'
+        },
+        year: {
+          type: 'string',
+          description: 'Filter by year (e.g., "2025", "2026")'
+        },
+        department: {
+          type: 'string',
+          description: 'Filter by department'
+        },
+        rollup: {
+          type: 'string',
+          description: 'Filter by FP&A rollup grouping'
+        },
+        account: {
+          type: 'string',
+          description: 'Filter by GL Account code'
+        },
+        vendor: {
+          type: 'string',
+          description: 'Filter by vendor name'
         },
         sheet_name: {
           type: 'string',
-          description: 'Override: specific sheet tab name to query directly'
+          description: 'Override: specific sheet tab name'
         }
       }
     }
