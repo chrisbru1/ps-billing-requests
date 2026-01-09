@@ -52,6 +52,26 @@ async function getAllAccounts() {
 }
 
 /**
+ * Common search term mappings to subtypes
+ * When users search for these terms, we should look at subtype instead of name
+ */
+const SEARCH_TO_SUBTYPE_MAP = {
+  'cash': 'Cash',
+  'bank': 'Bank',
+  'ar': 'Accounts Receivable',
+  'accounts receivable': 'Accounts Receivable',
+  'receivable': 'Accounts Receivable',
+  'ap': 'Accounts Payable',
+  'accounts payable': 'Accounts Payable',
+  'payable': 'Accounts Payable',
+  'prepaid': 'Prepaid',
+  'accrued': 'Accrued',
+  'revenue': 'Revenue',
+  'deferred revenue': 'Deferred Revenue',
+  'deferred': 'Deferred Revenue',
+};
+
+/**
  * Find accounts matching a query
  * @param {object} criteria - Search criteria
  * @param {string} criteria.search - Text to search in name (case-insensitive)
@@ -61,30 +81,47 @@ async function getAllAccounts() {
  */
 async function findAccounts(criteria = {}) {
   const accounts = await getAllAccounts();
+  let { search, type, subtype, codes } = criteria;
+
+  // Smart mapping: if search term maps to a known subtype, use subtype matching instead
+  if (search && !subtype) {
+    const searchLower = search.toLowerCase().trim();
+    if (SEARCH_TO_SUBTYPE_MAP[searchLower]) {
+      console.log(`[Workflow] Mapping search "${search}" to subtype "${SEARCH_TO_SUBTYPE_MAP[searchLower]}"`);
+      subtype = SEARCH_TO_SUBTYPE_MAP[searchLower];
+      search = null; // Clear search since we're using subtype
+    }
+  }
 
   return accounts.filter(acc => {
     // Filter by specific codes
-    if (criteria.codes && criteria.codes.length > 0) {
-      if (!criteria.codes.includes(acc.code)) return false;
+    if (codes && codes.length > 0) {
+      if (!codes.includes(acc.code)) return false;
     }
 
-    // Filter by type
-    if (criteria.type) {
-      if (acc.type?.toUpperCase() !== criteria.type.toUpperCase()) return false;
+    // Filter by type (exact match)
+    if (type) {
+      if (acc.type?.toUpperCase() !== type.toUpperCase()) return false;
     }
 
-    // Filter by subtype
-    if (criteria.subtype) {
-      if (!acc.subtype?.toLowerCase().includes(criteria.subtype.toLowerCase())) return false;
+    // Filter by subtype (exact match, case-insensitive)
+    if (subtype) {
+      if (acc.subtype?.toLowerCase() !== subtype.toLowerCase()) return false;
     }
 
-    // Filter by name search
-    if (criteria.search) {
-      const searchLower = criteria.search.toLowerCase();
-      const nameMatch = acc.name?.toLowerCase().includes(searchLower);
-      const subtypeMatch = acc.subtype?.toLowerCase().includes(searchLower);
-      const codeMatch = acc.code?.includes(criteria.search);
-      if (!nameMatch && !subtypeMatch && !codeMatch) return false;
+    // Filter by name search (only if not already matched by subtype)
+    if (search) {
+      const searchLower = search.toLowerCase();
+      const nameLower = (acc.name || '').toLowerCase();
+
+      // Exclude negations (e.g., "non-cash" when searching for "cash")
+      if (nameLower.includes('non-' + searchLower) || nameLower.includes('non ' + searchLower)) {
+        return false;
+      }
+
+      const nameMatch = nameLower.includes(searchLower);
+      const codeMatch = acc.code?.includes(search);
+      if (!nameMatch && !codeMatch) return false;
     }
 
     // Only active accounts
