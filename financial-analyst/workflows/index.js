@@ -130,6 +130,28 @@ const SUBTYPE_EXCLUSIONS = {
 };
 
 /**
+ * Specific account codes for common FP&A queries
+ * These match exactly what Rillet reports in each category
+ */
+const ACCOUNT_CODE_LISTS = {
+  'cash': [
+    '11001', // JP Morgan Checking
+    '11003', // JP Morgan Treasury Money Market Fund
+    '11016', // Shopify Funds Clearing (Fondue)
+    '11017', // SVB Checking Account - 6930 (Fondue)
+    '11018', // MESH - Company Account
+    '11023', // PayPal
+    '11024', // SVB Savings (2520)
+    '11028', // Stripe Money in Transit (Postscript)
+    '11029', // Shopify Money in Transit (Postscript)
+    '11031', // JP Morgan Prime Money Market Fund
+    '11033', // Petty cash
+    '11034', // Poalim Bank Nis.
+    '11035', // Poalim Bank $
+  ],
+};
+
+/**
  * Find accounts matching a query
  * @param {object} criteria - Search criteria
  * @param {string} criteria.search - Text to search in name (case-insensitive)
@@ -144,21 +166,31 @@ async function findAccounts(criteria = {}) {
   let exclusions = null; // Account name patterns to exclude
   const originalSearch = search; // Keep track of original search for exclusions
 
-  // Smart mapping: if search term maps to known subtype(s), use subtype matching instead
-  if (search && !subtype) {
+  // Smart mapping: if search term maps to known account codes or subtypes
+  if (search && !subtype && (!codes || codes.length === 0)) {
     const searchLower = search.toLowerCase().trim();
-    const mapped = SEARCH_TO_SUBTYPE_MAP[searchLower];
-    if (mapped) {
-      subtypes = Array.isArray(mapped) ? mapped : [mapped];
-      console.log(`[Workflow] Mapping search "${search}" to subtypes: ${subtypes.join(', ')}`);
 
-      // Check for exclusions for this search term
-      exclusions = SEARCH_EXCLUSIONS[searchLower];
-      if (exclusions) {
-        console.log(`[Workflow] Excluding accounts with names containing: ${exclusions.join(', ')}`);
+    // First check if we have a specific list of account codes for this search term
+    if (ACCOUNT_CODE_LISTS[searchLower]) {
+      codes = ACCOUNT_CODE_LISTS[searchLower];
+      console.log(`[Workflow] Using specific account codes for "${search}": ${codes.join(', ')}`);
+      search = null; // Clear search since we're using codes
+    }
+    // Otherwise, map to subtypes
+    else {
+      const mapped = SEARCH_TO_SUBTYPE_MAP[searchLower];
+      if (mapped) {
+        subtypes = Array.isArray(mapped) ? mapped : [mapped];
+        console.log(`[Workflow] Mapping search "${search}" to subtypes: ${subtypes.join(', ')}`);
+
+        // Check for exclusions for this search term
+        exclusions = SEARCH_EXCLUSIONS[searchLower];
+        if (exclusions) {
+          console.log(`[Workflow] Excluding accounts with names containing: ${exclusions.join(', ')}`);
+        }
+
+        search = null; // Clear search since we're using subtype
       }
-
-      search = null; // Clear search since we're using subtype
     }
   }
 
