@@ -35,10 +35,15 @@ const toolImplementations = {
       }
     });
 
-    // Build HAR request
+    // Build HAR request with auth header
     const harRequest = {
       method: method.toUpperCase(),
-      url: url.toString()
+      url: url.toString(),
+      headers: [
+        { name: 'Authorization', value: `Bearer ${process.env.RILLET_API_KEY}` },
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Accept', value: 'application/json' }
+      ]
     };
 
     // Add body for POST/PUT/PATCH requests
