@@ -53,12 +53,16 @@ async function calculateAccountBalances(accountCodes) {
 
     // Process journal entries
     for (const entry of data.journal_entries || []) {
-      for (const line of entry.lines || []) {
-        const lineCode = line.account?.code;
-        if (lineCode && accountCodes.includes(lineCode)) {
-          balances[lineCode].debits += parseFloat(line.debit || 0);
-          balances[lineCode].credits += parseFloat(line.credit || 0);
-          balances[lineCode].transactions++;
+      for (const item of entry.items || []) {
+        const itemCode = item.account_code;
+        if (itemCode && accountCodes.includes(itemCode)) {
+          const amount = parseFloat(item.amount?.amount || 0);
+          if (item.side === 'DEBIT') {
+            balances[itemCode].debits += amount;
+          } else if (item.side === 'CREDIT') {
+            balances[itemCode].credits += amount;
+          }
+          balances[itemCode].transactions++;
         }
       }
     }
