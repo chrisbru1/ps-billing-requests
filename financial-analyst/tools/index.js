@@ -15,7 +15,7 @@ const toolImplementations = {
 
   // Direct Rillet API via MCP execute-request
   'call_rillet_api': async (input) => {
-    const { endpoint, params = {} } = input;
+    const { method = 'GET', endpoint, params = {}, body } = input;
 
     if (!endpoint) {
       return {
@@ -35,14 +35,23 @@ const toolImplementations = {
       }
     });
 
+    // Build HAR request
+    const harRequest = {
+      method: method.toUpperCase(),
+      url: url.toString()
+    };
+
+    // Add body for POST/PUT/PATCH requests
+    if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+      harRequest.postData = {
+        mimeType: 'application/json',
+        text: JSON.stringify(body)
+      };
+    }
+
     // Use MCP's execute-request to make the actual API call
     const mcpClient = getRilletMCPClient();
-    return mcpClient.callTool('execute-request', {
-      harRequest: {
-        method: 'GET',
-        url: url.toString()
-      }
-    });
+    return mcpClient.callTool('execute-request', { harRequest });
   }
 };
 
