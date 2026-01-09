@@ -94,9 +94,24 @@ const SEARCH_TO_SUBTYPE_MAP = {
  * When searching for these terms, exclude accounts matching these patterns
  */
 const SEARCH_EXCLUSIONS = {
-  'cash': ['receivable', 'receivables'],
-  'liquid': ['receivable', 'receivables'],
-  'liquidity': ['receivable', 'receivables'],
+  'cash': [
+    'receivable', 'receivables',  // Not cash - these are AR
+    'clearing',                    // Transit/clearing accounts distort cash
+    'money in transit',            // Transit accounts
+    'in transit',                  // Transit accounts
+  ],
+  'liquid': [
+    'receivable', 'receivables',
+    'clearing',
+    'money in transit',
+    'in transit',
+  ],
+  'liquidity': [
+    'receivable', 'receivables',
+    'clearing',
+    'money in transit',
+    'in transit',
+  ],
   'bank': ['receivable', 'receivables'],
 };
 
