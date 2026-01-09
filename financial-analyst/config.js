@@ -39,12 +39,19 @@ The budget spreadsheet has normalized data with these columns:
 
 **How to query budget:**
 \`\`\`
-{ metric: "Gross Profit", year: "2026" }           → Annual Gross Profit
-{ metric: "Headcount", quarter: "Q1", year: "2026" } → Q1 headcount
-{ statement_type: "metrics", metric: "New Bookings" } → All New Bookings data
+{ year: "2026" }                    → ALL metrics for 2026 (best for calculated metrics!)
+{ quarter: "Q1", year: "2026" }     → All Q1 data
+{ metric: "Headcount", year: "2026" } → Specific metric
 \`\`\`
 
-The tool returns \`total_amount\` which is the SUM of all matching rows - use this for totals!
+The tool returns:
+- \`metric_totals\`: Object with each metric name and its total (USE THIS!)
+- \`total_amount\`: Grand total of all matching rows
+
+**For calculated metrics (Net Revenue, Gross Profit, etc.):**
+1. Query broadly: \`{ year: "2026" }\` to get all data
+2. Find components in \`metric_totals\`
+3. Calculate the result yourself
 
 ## Postscript Financial Metrics (IMPORTANT!)
 
@@ -272,14 +279,21 @@ Examples:
     name: 'get_budget_data',
     description: `Retrieves budget data from Google Sheets (normalized format with Metric, Month, Quarter, Year, Amount columns).
 
-The tool returns matching rows with amounts. Use total_amount for the sum of all matching rows.
+STRATEGY: Query BROADLY first, then calculate. The tool returns:
+- metric_totals: sum by each metric name (use this for calculations!)
+- total_amount: grand total of all matching rows
+
+For CALCULATED metrics like Net Revenue or Gross Profit:
+1. Query with just { year: "2026" } to get ALL metrics for the year
+2. Use metric_totals to find the component values
+3. Calculate: Net Revenue = Gross Revenue items - Twilio Carrier Fees
 
 Examples:
-- Gross Profit for 2026: { metric: "Gross Profit", year: "2026" } → total_amount is the annual total
-- Q1 Revenue: { metric: "Messaging Revenue", quarter: "Q1" }
-- Headcount by month: { statement_type: "metrics", metric: "Headcount" }
+- All 2026 data: { year: "2026" } → metric_totals has every line item summed
+- Just Q1: { quarter: "Q1", year: "2026" }
+- Filter to revenue: { metric: "Revenue", year: "2026" } → matches all revenue line items
 
-IMPORTANT: Use the returned total_amount and Amount values directly - these are the actual budget numbers!`,
+IMPORTANT: metric_totals contains ACTUAL NUMBERS - use them directly, don't make up values!`,
     input_schema: {
       type: 'object',
       properties: {

@@ -231,17 +231,30 @@ class GoogleSheetsClient {
         }, 0);
       }
 
+      // Group by metric and sum amounts for easier analysis
+      const metricSummary = {};
+      if (metricCol >= 0 && amountCol >= 0) {
+        for (const row of filtered) {
+          const metricName = row[headers[metricCol]];
+          const amount = parseFloat(row[headers[amountCol]]) || 0;
+          if (metricName) {
+            metricSummary[metricName] = (metricSummary[metricName] || 0) + amount;
+          }
+        }
+      }
+
       return {
         source: 'Google Sheets - Budget',
         sheet_name: targetSheet,
         available_tabs: availableTabs,
         query: { metric, month, quarter, year, department, account, vendor, rollup, statement_type },
-        results: filtered.slice(0, 200),
+        results: filtered.slice(0, 100), // Reduce to avoid token overload
         row_count: filtered.length,
         total_rows_in_sheet: data.length,
         total_amount: total,
+        metric_totals: metricSummary, // Summary by metric name
         headers: headers,
-        hint: 'Use the Amount column values directly. total_amount is the sum of all matching rows.'
+        hint: 'metric_totals shows sum by metric. total_amount is grand total. Use these numbers directly!'
       };
 
     } catch (error) {
