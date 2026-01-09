@@ -187,16 +187,9 @@ class GoogleSheetsClient {
         };
       }
 
-      // Find the header row (look for "Account" or "Metric" in first 20 rows)
-      let headerRowIndex = 0;
-      for (let i = 0; i < Math.min(20, rows.length); i++) {
-        const rowStr = (rows[i] || []).join(' ').toLowerCase();
-        if (rowStr.includes('account') || rowStr.includes('metric')) {
-          headerRowIndex = i;
-          console.log(`[Sheets] Found header row at index ${i}`);
-          break;
-        }
-      }
+      // Aleph format: headers are always in row 14 (index 13), skip first 13 metadata rows
+      const headerRowIndex = 13;
+      console.log(`[Sheets] Using Aleph format - header row at index ${headerRowIndex}`);
 
       // Parse data - header row found dynamically
       const headers = rows[headerRowIndex].map(h => h?.toString().trim());
