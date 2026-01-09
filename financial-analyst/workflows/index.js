@@ -90,7 +90,7 @@ const SEARCH_TO_SUBTYPE_MAP = {
 };
 
 /**
- * Exclusion patterns for certain search terms
+ * Exclusion patterns for certain search terms AND subtypes
  * When searching for these terms, exclude accounts matching these patterns
  */
 const SEARCH_EXCLUSIONS = {
@@ -112,7 +112,21 @@ const SEARCH_EXCLUSIONS = {
     'money in transit',
     'in transit',
   ],
-  'bank': ['receivable', 'receivables'],
+  'bank': [
+    'receivable', 'receivables',
+    'clearing',
+    'money in transit',
+    'in transit',
+  ],
+};
+
+/**
+ * Subtype to exclusions mapping
+ * When querying by subtype directly, also apply these exclusions
+ */
+const SUBTYPE_EXCLUSIONS = {
+  'cash': SEARCH_EXCLUSIONS['cash'],
+  'bank': SEARCH_EXCLUSIONS['bank'],
 };
 
 /**
@@ -151,6 +165,13 @@ async function findAccounts(criteria = {}) {
   // If subtype was explicitly provided, use it
   if (subtype && !subtypes) {
     subtypes = [subtype];
+
+    // Also check for exclusions when subtype is directly specified
+    const subtypeLower = subtype.toLowerCase().trim();
+    if (SUBTYPE_EXCLUSIONS[subtypeLower]) {
+      exclusions = SUBTYPE_EXCLUSIONS[subtypeLower];
+      console.log(`[Workflow] Subtype "${subtype}" has exclusions: ${exclusions.join(', ')}`);
+    }
   }
 
   return accounts.filter(acc => {
