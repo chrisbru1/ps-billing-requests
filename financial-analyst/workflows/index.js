@@ -54,21 +54,37 @@ async function getAllAccounts() {
 /**
  * Common search term mappings to subtypes
  * When users search for these terms, we should look at subtype instead of name
+ * Values can be a single subtype string OR an array of subtypes
  */
 const SEARCH_TO_SUBTYPE_MAP = {
-  'cash': 'Cash',
+  // "Cash" in FP&A means all liquid assets
+  'cash': ['Cash', 'Bank'],
   'bank': 'Bank',
+  'liquid': ['Cash', 'Bank'],
+  'liquidity': ['Cash', 'Bank'],
+
+  // Receivables
   'ar': 'Accounts Receivable',
   'accounts receivable': 'Accounts Receivable',
   'receivable': 'Accounts Receivable',
+  'receivables': 'Accounts Receivable',
+
+  // Payables
   'ap': 'Accounts Payable',
   'accounts payable': 'Accounts Payable',
   'payable': 'Accounts Payable',
+  'payables': 'Accounts Payable',
+
+  // Other common categories
   'prepaid': 'Prepaid',
+  'prepaids': 'Prepaid',
   'accrued': 'Accrued',
+  'accruals': 'Accrued',
   'revenue': 'Revenue',
   'deferred revenue': 'Deferred Revenue',
   'deferred': 'Deferred Revenue',
+  'fixed assets': 'Fixed Assets',
+  'fa': 'Fixed Assets',
 };
 
 /**
@@ -82,15 +98,22 @@ const SEARCH_TO_SUBTYPE_MAP = {
 async function findAccounts(criteria = {}) {
   const accounts = await getAllAccounts();
   let { search, type, subtype, codes } = criteria;
+  let subtypes = null; // Can be array for multi-subtype matching
 
-  // Smart mapping: if search term maps to a known subtype, use subtype matching instead
+  // Smart mapping: if search term maps to known subtype(s), use subtype matching instead
   if (search && !subtype) {
     const searchLower = search.toLowerCase().trim();
-    if (SEARCH_TO_SUBTYPE_MAP[searchLower]) {
-      console.log(`[Workflow] Mapping search "${search}" to subtype "${SEARCH_TO_SUBTYPE_MAP[searchLower]}"`);
-      subtype = SEARCH_TO_SUBTYPE_MAP[searchLower];
+    const mapped = SEARCH_TO_SUBTYPE_MAP[searchLower];
+    if (mapped) {
+      subtypes = Array.isArray(mapped) ? mapped : [mapped];
+      console.log(`[Workflow] Mapping search "${search}" to subtypes: ${subtypes.join(', ')}`);
       search = null; // Clear search since we're using subtype
     }
+  }
+
+  // If subtype was explicitly provided, use it
+  if (subtype && !subtypes) {
+    subtypes = [subtype];
   }
 
   return accounts.filter(acc => {
@@ -104,9 +127,11 @@ async function findAccounts(criteria = {}) {
       if (acc.type?.toUpperCase() !== type.toUpperCase()) return false;
     }
 
-    // Filter by subtype (exact match, case-insensitive)
-    if (subtype) {
-      if (acc.subtype?.toLowerCase() !== subtype.toLowerCase()) return false;
+    // Filter by subtype(s) (exact match, case-insensitive)
+    if (subtypes && subtypes.length > 0) {
+      const accSubtype = (acc.subtype || '').toLowerCase();
+      const matches = subtypes.some(st => st.toLowerCase() === accSubtype);
+      if (!matches) return false;
     }
 
     // Filter by name search (only if not already matched by subtype)
