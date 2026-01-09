@@ -1,6 +1,8 @@
 // Financial Analyst Workflows
 // High-level orchestrated operations that combine multiple data sources
 
+const dbCache = require('../db/cache');
+
 const RILLET_API_BASE = process.env.RILLET_API_BASE_URL || 'https://api.rillet.com';
 
 /**
@@ -157,25 +159,74 @@ async function findAccounts(criteria = {}) {
 }
 
 /**
- * Cache for ALL account balances - calculated once, used for all queries
+ * In-memory cache (used as L1 cache, Postgres as L2)
  */
-let allBalancesCache = null;
-let allBalancesCacheTime = null;
-const BALANCE_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+let memoryCache = null;
+let memoryCacheTime = null;
+const MEMORY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for memory cache
 
 /**
- * Calculate balances for ALL accounts (cached)
- * This is slow but only runs once per cache period
+ * Get balances from Postgres cache
+ * Returns null if no cache or cache is stale (> 24 hours)
+ */
+async function getBalancesFromDB() {
+  try {
+    const cached = await dbCache.getBalanceCache();
+    if (!cached) return null;
+
+    // Consider cache stale after 24 hours
+    const MAX_AGE_HOURS = 24;
+    if (cached.age_hours > MAX_AGE_HOURS) {
+      console.log(`[Workflow] DB cache is ${cached.age_hours}h old (max ${MAX_AGE_HOURS}h), needs refresh`);
+      return null;
+    }
+
+    return cached.balances;
+  } catch (error) {
+    console.error('[Workflow] Error reading DB cache:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Save balances to Postgres cache
+ */
+async function saveBalancesToDB(balances) {
+  try {
+    await dbCache.setBalanceCache(balances);
+  } catch (error) {
+    console.error('[Workflow] Error saving to DB cache:', error.message);
+  }
+}
+
+/**
+ * Calculate balances for ALL accounts
+ * Uses L1 (memory) -> L2 (Postgres) -> Rillet (slow) fallback
  */
 async function getAllAccountBalances(forceRefresh = false) {
   const now = Date.now();
 
-  // Return cached if valid
-  if (!forceRefresh && allBalancesCache && allBalancesCacheTime && (now - allBalancesCacheTime) < BALANCE_CACHE_TTL) {
-    const cacheAge = Math.round((now - allBalancesCacheTime) / 1000);
-    console.log(`[Workflow] Using cached balances (${cacheAge}s old, ${Object.keys(allBalancesCache).length} accounts)`);
-    return allBalancesCache;
+  // L1: Check memory cache first (fastest)
+  if (!forceRefresh && memoryCache && memoryCacheTime && (now - memoryCacheTime) < MEMORY_CACHE_TTL) {
+    const cacheAge = Math.round((now - memoryCacheTime) / 1000);
+    console.log(`[Workflow] Using memory cache (${cacheAge}s old, ${Object.keys(memoryCache).length} accounts)`);
+    return memoryCache;
   }
+
+  // L2: Check Postgres cache (fast)
+  if (!forceRefresh) {
+    const dbBalances = await getBalancesFromDB();
+    if (dbBalances) {
+      // Populate memory cache from DB
+      memoryCache = dbBalances;
+      memoryCacheTime = now;
+      console.log(`[Workflow] Loaded ${Object.keys(dbBalances).length} accounts from Postgres cache`);
+      return dbBalances;
+    }
+  }
+
+  // L3: Calculate from Rillet (slow - only on refresh or empty cache)
+  console.log('[Workflow] Calculating balances from Rillet (this takes ~2 minutes)...');
 
   const accounts = await getAllAccounts();
   const accountsMap = {};
@@ -193,9 +244,8 @@ async function getAllAccountBalances(forceRefresh = false) {
   let cursor = null;
   let pageCount = 0;
   let totalEntries = 0;
-  const maxPages = 500; // Higher limit for complete data
+  const maxPages = 500;
 
-  console.log(`[Workflow] Calculating balances for ALL ${accounts.length} accounts (this may take a while)...`);
   const startTime = Date.now();
 
   do {
@@ -257,10 +307,12 @@ async function getAllAccountBalances(forceRefresh = false) {
     };
   }
 
-  // Cache the results
-  allBalancesCache = results;
-  allBalancesCacheTime = now;
-  console.log(`[Workflow] Cached balances for ${Object.keys(results).length} accounts`);
+  // Save to both caches
+  memoryCache = results;
+  memoryCacheTime = now;
+  await saveBalancesToDB(results);
+
+  console.log(`[Workflow] Cached ${Object.keys(results).length} accounts to memory + Postgres`);
 
   return results;
 }
@@ -451,23 +503,30 @@ async function refreshBalanceCache() {
 }
 
 /**
- * Get cache status
+ * Get cache status (checks both memory and Postgres)
  */
-function getCacheStatus() {
+async function getCacheStatus() {
   const now = Date.now();
-  if (!allBalancesCache || !allBalancesCacheTime) {
-    return { cached: false, message: 'No balance cache - first query will be slow (~2 min)' };
-  }
-  const ageSeconds = Math.round((now - allBalancesCacheTime) / 1000);
-  const ageMinutes = Math.round(ageSeconds / 60);
-  const remainingSeconds = Math.round((BALANCE_CACHE_TTL - (now - allBalancesCacheTime)) / 1000);
+
+  // Check memory cache
+  const memoryValid = memoryCache && memoryCacheTime && (now - memoryCacheTime) < MEMORY_CACHE_TTL;
+
+  // Check Postgres cache
+  const dbStatus = await dbCache.getCacheStatus();
+
   return {
-    cached: true,
-    accounts: Object.keys(allBalancesCache).length,
-    age_seconds: ageSeconds,
-    age_human: ageMinutes > 0 ? `${ageMinutes}m ${ageSeconds % 60}s` : `${ageSeconds}s`,
-    expires_in_seconds: Math.max(0, remainingSeconds),
-    message: `Cache valid for ${Math.max(0, Math.round(remainingSeconds / 60))} more minutes`
+    memory_cache: memoryValid ? {
+      accounts: Object.keys(memoryCache).length,
+      age_seconds: Math.round((now - memoryCacheTime) / 1000)
+    } : null,
+    postgres_cache: dbStatus.cached ? {
+      accounts: dbStatus.account_count,
+      age_hours: dbStatus.age_hours,
+      created_at: dbStatus.created_at
+    } : null,
+    message: dbStatus.cached
+      ? `Postgres cache: ${dbStatus.message}. Queries will be fast.`
+      : 'No cache. First query will take ~2 minutes to build cache.'
   };
 }
 

@@ -5,7 +5,9 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node --watch app.js"
+    "dev": "node --watch app.js",
+    "init-db": "node scripts/init-db.js",
+    "refresh-cache": "node scripts/refresh-balance-cache.js"
   },
   "keywords": [
     "slack",
@@ -21,7 +23,8 @@
     "@octokit/rest": "^21.0.0",
     "@slack/bolt": "^3.17.0",
     "dotenv": "^16.3.1",
-    "googleapis": "^148.0.0"
+    "googleapis": "^148.0.0",
+    "pg": "^8.16.3"
   },
   "engines": {
     "node": ">=18.0.0"
